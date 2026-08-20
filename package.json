@@ -1,0 +1,33 @@
+{
+  "name": "microplate-assay-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:offline": "npm run build && node scripts/build-offline.mjs",
+    "typecheck": "tsc -b --pretty false",
+    "test:unit": "vitest run",
+    "test:real": "node --import tsx scripts/validate-real-file.ts",
+    "test": "npm run test:unit && npm run build"
+  },
+  "dependencies": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "xlsx-js-style": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "tsx": "^4.23.5",
+    "typescript": "5.9.3",
+    "vite": "8.2.1",
+    "vitest": "^4.1.10"
+  }
+}
