@@ -85,7 +85,10 @@ describe("manual plate-reading import seam", () => {
       const workbook = XLSX.read(createReadingTemplateWorkbook(template, 2), { type: "array" });
       for (const sheetName of workbook.SheetNames.filter((name) => name !== "填写说明")) {
         const sheet = workbook.Sheets[sheetName];
-        sheet.B8 = { t: "n", v: sheetName.endsWith("1") ? 0 : 1 };
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "" });
+        const headerIndex = matrix.findIndex((row) => String(row[1] ?? "") === "1");
+        const valueCell = XLSX.utils.encode_cell({ r: headerIndex + 1, c: 1 });
+        sheet[valueCell] = { t: "n", v: sheetName.endsWith("1") ? 0 : 1 };
       }
       const bytes = XLSX.write(workbook, { type: "array", bookType: "xlsx" });
       const result = parseReadingTemplateWorkbook(bytes, `${template.id}-well.xlsx`, metadata);

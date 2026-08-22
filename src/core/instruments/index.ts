@@ -8,6 +8,8 @@ import {
 import { parseVarioskanLuxWorkbook } from "./varioskan-lux";
 import { parseVictorLegacyWorkbook } from "./victor-legacy";
 import { parseSkanitXml } from "./skanit-xml";
+import { detectedAssayModule } from "../assay-workflows";
+import { parseReproducibleProject } from "../project-file";
 
 type WorkbookParser = (bytes: ArrayBuffer, sourceFileName: string) => ParsedPlate;
 
@@ -47,14 +49,17 @@ export async function parseMicroplateFile(file: File): Promise<ParsedPlate> {
 export type PlateReadingImportRequest =
   | { kind: "instrument-file"; file: File }
   | { kind: "manual-paste"; text: string; metadata: ManualReadingMetadata }
-  | { kind: "reading-template"; file: File; metadata: ManualReadingMetadata };
+  | { kind: "reading-template"; file: File; metadata: ManualReadingMetadata }
+  | { kind: "project-file"; file: File };
 
 export async function importPlateReadings(request: PlateReadingImportRequest): Promise<PlateImportBatch> {
   if (request.kind === "manual-paste") return parsePastedPlateReadings(request.text, request.metadata);
+  if (request.kind === "project-file") return parseReproducibleProject(await request.file.text(), request.file.name);
   if (request.kind === "reading-template") {
     return parseReadingTemplateWorkbook(await request.file.arrayBuffer(), request.file.name, request.metadata);
   }
   const plate = await parseMicroplateFile(request.file);
+  plate.metadata.detectedAssayModuleId = detectedAssayModule(plate);
   return {
     id: `instrument-file-${Date.now()}`,
     sourceKind: "instrument-file",

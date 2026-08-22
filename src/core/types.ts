@@ -2,21 +2,28 @@ export type DetectionMode = "absorbance" | "fluorescence" | "luminescence" | "tr
 export type CellViabilityMethod = "cck8" | "mtt" | "resazurin" | "alamarblue" | "unknown";
 export type MetadataEvidence = "reported" | "user-reported" | "inferred" | "unknown";
 export type WellRole = "unassigned" | "sample" | "control" | "qc" | "blank" | "standard";
-export type PlateImportSource = "instrument-file" | "manual-paste" | "reading-template";
-export type AssayStatus = "ready" | "planned";
+export type PlateImportSource = "instrument-file" | "manual-paste" | "reading-template" | "project-file";
+export type AssayStatus = "complete" | "preview" | "planned";
 export type AssayModuleId = "cell-viability" | "protein-quant" | "atp-quant" | "elisa" | "luciferase" | "microbial-growth" | "advanced-binding" | "unknown";
 export type MeasurementKind = "endpoint" | "kinetic" | "spectrum" | "derived" | "replicate-summary";
 export type MeasurementSource = "measured" | "instrument-calculated";
 
 export type AssayModuleDefinition = {
-  id: string;
+  id: AssayModuleId;
   name: string;
   shortName: string;
   measurementTarget: string;
   description: string;
   detectionModes: DetectionMode[];
   status: AssayStatus;
+  supportedMethods: string[];
+  requiredInformation: string[];
+  availableAnalyses: string[];
+  deferredAnalyses: string[];
+  annotationGuidance: string;
 };
+
+export type AssayAssignmentDecision = "matched" | "system-detected" | "user-confirmed" | "manual" | "project-restored";
 
 export type PlateMetadata = {
   sourceKind: PlateImportSource;
@@ -47,7 +54,19 @@ export type PlateMetadata = {
   sheetName: string;
   adapterId: string;
   assayModuleId?: AssayModuleId;
+  detectedAssayModuleId?: AssayModuleId;
+  selectedAssayModuleId?: AssayModuleId;
+  confirmedAssayModuleId?: AssayModuleId;
+  assayAssignmentDecision?: AssayAssignmentDecision;
+  reopenedFromProjectFile?: string;
   softwareVersion?: string;
+};
+
+export type ExperimentRecord = {
+  name: string;
+  operator: string;
+  date: string;
+  notes: string;
 };
 
 export type PlateImportBatch = {
@@ -56,6 +75,9 @@ export type PlateImportBatch = {
   sourceName: string;
   plates: ParsedPlate[];
   warnings: string[];
+  experiment?: ExperimentRecord;
+  restoredAnalysisConfig?: AnalysisConfig;
+  restoredActiveModuleId?: AssayModuleId;
 };
 
 export type MeasurementPoint = {

@@ -102,12 +102,19 @@ export function analysisPackageJson(plate: ParsedPlate, wells: WellRecord[], con
   }, null, 2);
 }
 
-export function assayMeasurementsCsv(plate: ParsedPlate): string {
-  const headers = ["assay_module", "step_id", "step_name", "kind", "source", "detection_mode", "signal_unit", "formula", "well", "row", "column", "sample", "group", "concentration", "concentration_unit", "time_seconds", "wavelength_nm", "excitation_nm", "emission_nm", "value", "value_type", "saturated", "disabled"];
+export function assayMeasurementsCsv(plate: ParsedPlate, annotatedWells: WellRecord[] = plate.wells): string {
+  const headers = ["confirmed_assay_module", "detected_assay_module", "assignment_decision", "plate_name", "source_file", "source_kind", "adapter_id", "step_id", "step_name", "kind", "source", "detection_mode", "signal_unit", "formula", "well", "row", "column", "instrument_sample", "instrument_group", "role", "sample_id", "annotated_group", "treatment", "annotated_concentration", "timepoint", "biological_replicate", "technical_replicate", "excluded", "notes", "instrument_concentration", "concentration_unit", "time_seconds", "wavelength_nm", "excitation_nm", "emission_nm", "value", "value_type", "saturated", "disabled"];
   const dataset = plate.assayData;
   if (!dataset) return rowsToCsv(headers, []);
+  const annotations = new Map(annotatedWells.map((well) => [well.well, well]));
   return rowsToCsv(headers, dataset.measurements.flatMap((series) => series.points.map((point) => ({
-    assay_module: dataset.moduleId,
+    confirmed_assay_module: plate.metadata.confirmedAssayModuleId ?? dataset.moduleId,
+    detected_assay_module: plate.metadata.detectedAssayModuleId ?? dataset.moduleId,
+    assignment_decision: plate.metadata.assayAssignmentDecision ?? "",
+    plate_name: plate.metadata.plateName,
+    source_file: plate.metadata.sourceFileName,
+    source_kind: plate.metadata.sourceKind,
+    adapter_id: plate.metadata.adapterId,
     step_id: series.id,
     step_name: series.name,
     kind: series.kind,
@@ -118,9 +125,19 @@ export function assayMeasurementsCsv(plate: ParsedPlate): string {
     well: point.well,
     row: point.row,
     column: point.column,
-    sample: point.sampleName,
-    group: point.group,
-    concentration: point.concentration,
+    instrument_sample: point.sampleName,
+    instrument_group: point.group,
+    role: annotations.get(point.well)?.role ?? "",
+    sample_id: annotations.get(point.well)?.sampleId ?? "",
+    annotated_group: annotations.get(point.well)?.group ?? "",
+    treatment: annotations.get(point.well)?.treatment ?? "",
+    annotated_concentration: annotations.get(point.well)?.concentration ?? "",
+    timepoint: annotations.get(point.well)?.timepoint ?? "",
+    biological_replicate: annotations.get(point.well)?.biologicalReplicate ?? "",
+    technical_replicate: annotations.get(point.well)?.technicalReplicate ?? "",
+    excluded: annotations.get(point.well)?.excluded ?? false,
+    notes: annotations.get(point.well)?.notes ?? "",
+    instrument_concentration: point.concentration,
     concentration_unit: point.concentrationUnit,
     time_seconds: point.timeSeconds,
     wavelength_nm: point.wavelengthNm,

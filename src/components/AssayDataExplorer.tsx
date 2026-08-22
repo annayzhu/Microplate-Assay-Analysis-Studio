@@ -74,7 +74,7 @@ function StandardCurvePanel({ curve }: { curve: StandardCurve }) {
   </section>;
 }
 
-export function AssayDataExplorer({ dataset, onExport }: { dataset: AssayDataset; onExport: () => void }) {
+export function AssayDataExplorer({ dataset, onExport, onExportProject }: { dataset: AssayDataset; onExport: () => void; onExportProject?: () => void }) {
   const initialId = dataset.primaryMeasurementId || dataset.measurements[0]?.id || "";
   const [selectedId, setSelectedId] = useState(initialId);
   const selected = dataset.measurements.find((item) => item.id === selectedId) ?? dataset.measurements[0];
@@ -84,7 +84,7 @@ export function AssayDataExplorer({ dataset, onExport }: { dataset: AssayDataset
   return <div className="assay-explorer">
     <div className="assay-capabilities">{dataset.capabilities.map((capability) => <span key={capability}>{capability}</span>)}</div>
     <section className="panel assay-step-panel">
-      <div className="panel-head assay-step-head"><div><h3>测量与计算步骤</h3><p>Measured 为仪器原始读数；Calculated 为 SkanIt 计算结果。两者分别保留。</p></div><button type="button" className="secondary-button mini" onClick={onExport}>导出全部长表 CSV</button></div>
+      <div className="panel-head assay-step-head"><div><h3>测量与计算步骤</h3><p>Measured 为仪器原始读数；Calculated 为 SkanIt 计算结果。两者分别保留。</p></div><div className="assay-export-actions"><button type="button" className="secondary-button mini" onClick={onExport}>导出全部长表 CSV</button>{onExportProject ? <button type="button" className="secondary-button mini" onClick={onExportProject}>保存可复现项目</button> : null}</div></div>
       <div className="assay-step-controls"><label><span>当前步骤</span><select value={selected.id} onChange={(event) => setSelectedId(event.target.value)}>{dataset.measurements.map((measurement) => <option key={measurement.id} value={measurement.id}>{measurement.source === "measured" ? "Measured" : "Calculated"} · {measurement.name}</option>)}</select></label><div><span>{selected.kind}</span><strong>{uniqueWells} wells · {selected.points.length} points</strong><small>{selected.signalUnit}{selected.formula ? ` · ${selected.formula}` : ""}</small></div></div>
     </section>
     <div className="assay-result-grid">
@@ -92,6 +92,6 @@ export function AssayDataExplorer({ dataset, onExport }: { dataset: AssayDataset
       <section className="panel assay-data-panel"><div className="panel-head compact-panel-head"><div><h3>结果明细</h3><p>当前步骤最多预览 300 行；导出文件包含全部结果。</p></div></div><div className="table-scroll"><table><thead><tr><th>Well</th><th>Sample</th><th>Group</th><th>Conc.</th><th>Time s</th><th>λ nm</th><th>Value</th><th>Type</th></tr></thead><tbody>{displayedPoints.map((point, index) => <tr key={`${point.well}-${index}`}><td>{point.well}</td><td>{point.sampleName || "—"}</td><td>{point.group || "—"}</td><td>{point.concentration === null ? "—" : `${number(point.concentration)} ${point.concentrationUnit}`}</td><td>{number(point.timeSeconds, 2)}</td><td>{number(point.wavelengthNm ?? point.emissionWavelengthNm ?? point.excitationWavelengthNm, 1)}</td><td>{number(point.value)}</td><td>{point.valueType}</td></tr>)}</tbody></table></div></section>
     </div>
     {dataset.standardCurves.map((curve) => <StandardCurvePanel key={curve.id} curve={curve} />)}
-    <div className="method-note assay-provenance-note"><strong>结果解释边界</strong><p>标准曲线、浓度、峰值、背景扣除和通道比值均优先展示 SkanIt 已导出的结果与公式；本工具不在缺少原始协议参数时擅自替换仪器算法。若要进行组间显著性检验，仍需补充独立生物学重复，而不能把同一板内技术复孔当作独立 n。</p></div>
+    <div className="method-note assay-provenance-note"><strong>结果解释边界</strong><p>标准曲线、浓度、峰值、背景扣除和通道比值均优先展示 SkanIt 已导出的结果与公式；本工具不在缺少原始协议参数时擅自替换仪器算法。若要进行组间显著性检验，需补充真实独立的生物学重复；同一板可以包含多个独立 Bio，但每个 Bio 内的技术复孔不能作为独立 n。</p>{onExportProject ? <small>“可复现项目”用于以后恢复原始读数、注释、模块确认和参数；常规结果交换请优先使用 CSV。</small> : null}</div>
   </div>;
 }

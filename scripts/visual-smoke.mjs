@@ -33,7 +33,36 @@ async function dragBetweenWells(startWell, endWell, additive = false, selectingS
 
 try {
   await page.goto("http://127.0.0.1:4178/", { waitUntil: "networkidle" });
+  const landingText = await page.locator("body").innerText();
+  for (const signal of ["完整分析可用", "数据导入与预览可用", "计划中"]) {
+    if (!landingText.includes(signal)) throw new Error(`Module capability states are missing: ${signal}`);
+  }
+  await page.getByRole("button", { name: /蛋白定量/ }).click();
+  const proteinText = await page.locator("body").innerText();
+  for (const signal of ["标准品浓度和单位", "仪器标准曲线核查", "本系统标准曲线复算"]) {
+    if (!proteinText.includes(signal)) throw new Error(`Protein workflow guidance is missing: ${signal}`);
+  }
+  for (const tabName of ["仪器结果文件", "粘贴孔板读数", "读数模板"]) {
+    if (!await page.getByRole("tab", { name: tabName }).isVisible()) throw new Error(`Shared import tab is missing from protein workflow: ${tabName}`);
+  }
+  await page.getByRole("button", { name: /ATP 发光定量/ }).click();
+  if (!(await page.locator("body").innerText()).includes("积分或选取时间窗")) throw new Error("ATP-specific workflow guidance is missing.");
+  await page.getByRole("button", { name: /单 \/ 双荧光素酶/ }).click();
+  if (!(await page.locator("body").innerText()).includes("Firefly 与 Renilla 步骤映射")) throw new Error("Luciferase-specific workflow guidance is missing.");
+  await page.getByRole("button", { name: /细胞活性 \/ 细胞增殖/ }).click();
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-start.png"), fullPage: true });
+
+  await page.getByRole("button", { name: /蛋白定量/ }).click();
+  await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(resolve("tests/fixtures/varioskan-lux-cck8-day0.xlsx"));
+  await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+  const mismatchPreview = await page.locator(".import-preview").innerText();
+  if (!mismatchPreview.includes("选择与识别不一致")) throw new Error("Assay mismatch was not made visible in import preview.");
+  const mismatchLoadButton = page.getByRole("button", { name: "确认载入 1 块板" });
+  if (!await mismatchLoadButton.isDisabled()) throw new Error("Assay mismatch did not require explicit confirmation.");
+  await page.getByText("我已核对实验记录", { exact: false }).click();
+  if (await mismatchLoadButton.isDisabled()) throw new Error("Explicit assay mismatch confirmation did not unlock import.");
+  await page.getByRole("button", { name: "取消" }).click();
+  await page.getByRole("button", { name: /细胞活性 \/ 细胞增殖/ }).click();
 
   await page.getByRole("tab", { name: "读数模板" }).click();
   await page.getByLabel("读数模板板型").selectOption("384");
@@ -88,14 +117,14 @@ try {
   await page.getByRole("button", { name: "重置为百分之百" }).click();
   if (await page.locator(".plate-scroll").getAttribute("data-zoom") !== "100") throw new Error("Zoom reset did not return to 100%.");
 
-  await page.getByLabel("分组 · Group *").fill("ManualGroup");
-  await page.getByLabel("生物学重复 *").fill("Bio1");
+  await page.getByLabel("分组 · Group").fill("ManualGroup");
+  await page.getByLabel("生物学重复").fill("Bio1");
   await page.getByText("尚未应用", { exact: true }).waitFor();
   await page.locator('[data-well="H12"]').click();
-  if (await page.getByLabel("分组 · Group *").inputValue() !== "ManualGroup") throw new Error("Draft did not persist after changing the selected wells.");
+  if (await page.getByLabel("分组 · Group").inputValue() !== "ManualGroup") throw new Error("Draft did not persist after changing the selected wells.");
   await page.getByRole("button", { name: "应用到所选 1 个孔" }).click();
   await page.getByText("已应用", { exact: true }).waitFor();
-  await page.getByLabel("分组 · Group *").fill("尚未保存的分组");
+  await page.getByLabel("分组 · Group").fill("尚未保存的分组");
   let dirtyPromptSeen = false;
   page.once("dialog", async (dialog) => { dirtyPromptSeen = true; await dialog.dismiss(); });
   await page.locator(".workspace-nav").getByRole("button", { name: /分析与导出/ }).click();
@@ -112,11 +141,28 @@ try {
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
+  const projectDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存可复现项目" }).click();
+  const projectDownload = await projectDownloadEvent;
+  const projectPath = await projectDownload.path();
+  if (!projectPath || !projectDownload.suggestedFilename().includes("reproducible-project.json")) throw new Error("Reproducible project export was not produced.");
+  await page.locator('input[type="file"][accept=".json"]').setInputFiles(projectPath);
+  await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+  if (!(await page.locator(".import-preview").innerText()).includes("可复现项目")) throw new Error("Project file did not re-enter the shared preview seam.");
+  await page.getByRole("button", { name: "确认载入 2 块板" }).click();
+  await page.getByRole("button", { name: "2. 培养板 2" }).click();
+  await page.getByRole("button", { name: "进入板图与注释" }).click();
+  await page.locator('[data-well="H12"]').click();
+  if (!(await page.locator(".well-detail").innerText()).includes("ManualGroup")) throw new Error("Project round-trip did not restore current annotations.");
+  await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   await page.getByRole("tab", { name: "仪器结果文件" }).click();
 
   const fixturePath = resolve("tests/fixtures/varioskan-lux-cck8-day0.xlsx");
   await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(fixturePath);
-  await page.waitForTimeout(1_000);
+  await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+  const fixturePreview = await page.locator(".import-preview").innerText();
+  if (!fixturePreview.includes("系统识别") || !fixturePreview.includes("细胞活性 / 细胞增殖")) throw new Error("Instrument import did not pass through assay review preview.");
+  await page.getByRole("button", { name: "确认载入 1 块板" }).click();
 
   const importedText = await page.locator("body").innerText();
   const requiredImportSignals = ["本次实验基本信息", "CCK-8 / WST-8", "吸光", "450 nm", "96 个已测孔"];
@@ -146,8 +192,13 @@ try {
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   const dualLucPath = resolve("酶标仪demo/Promega Dual-Luciferase Reporter Assay with Varioskan LUX.xlsx");
   await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(dualLucPath);
+  await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+  const dualPreview = await page.locator(".import-preview").innerText();
+  if (!dualPreview.includes("单 / 双荧光素酶")) throw new Error("Dual-Luciferase was not routed through the Luciferase module preview.");
+  await page.getByRole("button", { name: "确认载入 1 块板" }).click();
   await page.getByText("Dual-Luciferase Reporter Assay", { exact: true }).first().waitFor();
-  await page.getByRole("button", { name: "进入分析与导出" }).click();
+  await page.getByRole("button", { name: "进入板图与注释" }).click();
+  await page.getByRole("button", { name: "进入分析" }).click();
   const genericText = await page.locator("body").innerText();
   const requiredGenericSignals = ["测量与计算步骤", "Luminescence: Firefly", "Luminescence: Renilla", "Signal normalization", "Standard curve", "导出全部长表 CSV"];
   for (const signal of requiredGenericSignals) {
