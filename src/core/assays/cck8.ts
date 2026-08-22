@@ -175,6 +175,18 @@ export function analyzeCellViability(wells: WellRecord[], config: AnalysisConfig
     }
   }
 
+  for (const [key, summaries] of biologicalGroups) {
+    if (summaries.length >= 3 && summaries.every((summary) => summary.nTechnical === 1)) {
+      const first = summaries[0];
+      findings.push({
+        code: "REPLICATE_STRUCTURE_REVIEW",
+        severity: "info",
+        message: `${displayGroup(first)} 的每个 Bio 都只有 1 个孔。若这些孔不是独立培养、处理或制备单元，请不要把它们标为独立生物学重复。`,
+        wells: technicalSummaries.filter((item) => biologicalKey(item) === key).flatMap((item) => item.wells),
+      });
+    }
+  }
+
   const technicalByBiologicalKey = new Map<string, TechnicalSummary[]>();
   for (const summary of technicalSummaries) {
     const key = biologicalKey(summary);

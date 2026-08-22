@@ -20,6 +20,8 @@ export type ManualReadingMetadata = {
   detectionMode: DetectionMode;
   signalUnit: string;
   wavelengthNm: number | null;
+  excitationWavelengthNm?: number | null;
+  emissionWavelengthNm?: number | null;
 };
 
 type HeaderMatch = {
@@ -125,8 +127,8 @@ function manualPlate(
     detectionMode: metadata.detectionMode,
     signalUnit: metadata.signalUnit,
     wavelengthNm: metadata.detectionMode === "absorbance" ? metadata.wavelengthNm : null,
-    excitationWavelengthNm: null,
-    emissionWavelengthNm: null,
+    excitationWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.excitationWavelengthNm ?? null : null,
+    emissionWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.emissionWavelengthNm ?? null : null,
     formula: "",
     sourceSteps: [sourceKind === "manual-paste" ? "从表格复制粘贴" : "标准读数模板"],
     points,
@@ -150,8 +152,8 @@ function manualPlate(
       detectionMode: metadata.detectionMode,
       signalUnit: metadata.signalUnit,
       wavelengthNm: metadata.detectionMode === "absorbance" ? metadata.wavelengthNm : null,
-      excitationWavelengthNm: null,
-      emissionWavelengthNm: null,
+      excitationWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.excitationWavelengthNm ?? null : null,
+      emissionWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.emissionWavelengthNm ?? null : null,
       referenceWavelengthNm: null,
       measurementName: measurement.name,
       plateName,
@@ -168,6 +170,10 @@ function manualPlate(
       sheetName: plateName,
       adapterId,
       assayModuleId: metadata.assayModuleId,
+      detectedAssayModuleId: "unknown",
+      selectedAssayModuleId: metadata.assayModuleId,
+      confirmedAssayModuleId: metadata.assayModuleId,
+      assayAssignmentDecision: "manual",
     },
     rows: template.rows,
     columns: template.columns,
@@ -222,8 +228,8 @@ function parseMatrixBlocks(
           valueType: "raw",
           timeSeconds: null,
           wavelengthNm: metadata.detectionMode === "absorbance" ? metadata.wavelengthNm : null,
-          excitationWavelengthNm: null,
-          emissionWavelengthNm: null,
+          excitationWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.excitationWavelengthNm ?? null : null,
+          emissionWavelengthNm: metadata.detectionMode === "fluorescence" ? metadata.emissionWavelengthNm ?? null : null,
           saturated: false,
           disabled: false,
         });
@@ -254,13 +260,13 @@ function parseMatrixBlocks(
   return plates;
 }
 
-function batch(sourceKind: PlateImportSource, sourceName: string, plates: ParsedPlate[]): PlateImportBatch {
+function batch(sourceKind: PlateImportSource, sourceName: string, plates: ParsedPlate[], extraWarnings: string[] = []): PlateImportBatch {
   return {
     id: `${sourceKind}-${Date.now()}`,
     sourceKind,
     sourceName,
     plates,
-    warnings: plates.flatMap((plate) => plate.warnings),
+    warnings: [...plates.flatMap((plate) => plate.warnings), ...extraWarnings],
   };
 }
 
@@ -270,15 +276,22 @@ export function parsePastedPlateReadings(rawText: string, metadata: ManualReadin
 }
 
 function templateMetadata(matrix: Matrix, fallback: ManualReadingMetadata): ManualReadingMetadata {
-  const values = new Map(matrix.slice(0, 12).map((row) => [cellText(row[0]).toLowerCase(), cellText(row[1])]));
+  const values = new Map(matrix.slice(0, 20).map((row) => [cellText(row[0]).toLowerCase(), cellText(row[1])]));
   const mode = values.get("detection_mode") as DetectionMode | undefined;
   const wavelengthText = values.get("wavelength_nm") ?? "";
   const wavelength = wavelengthText === "" ? fallback.wavelengthNm : Number(wavelengthText);
+  const excitation = Number(values.get("excitation_nm") ?? "");
+  const emission = Number(values.get("emission_nm") ?? "");
+  const moduleId = values.get("assay_module") as AssayModuleId | undefined;
   return {
     ...fallback,
+    assayModuleId: moduleId || fallback.assayModuleId,
+    assayMethodLabel: values.get("assay_method") || fallback.assayMethodLabel,
     detectionMode: mode && ["absorbance", "fluorescence", "luminescence", "trf", "alpha"].includes(mode) ? mode : fallback.detectionMode,
     signalUnit: values.get("signal_unit") || fallback.signalUnit,
     wavelengthNm: Number.isFinite(wavelength) ? wavelength : fallback.wavelengthNm,
+    excitationWavelengthNm: Number.isFinite(excitation) && values.get("excitation_nm") !== "" ? excitation : fallback.excitationWavelengthNm ?? null,
+    emissionWavelengthNm: Number.isFinite(emission) && values.get("emission_nm") !== "" ? emission : fallback.emissionWavelengthNm ?? null,
   };
 }
 
@@ -303,18 +316,24 @@ export function parseReadingTemplateWorkbook(bytes: ArrayBuffer, sourceFileName:
     }
   }
   if (!plates.length) throw new Error(`模板中没有可导入的孔板。${errors.join(" ")}`);
-  if (errors.length) throw new Error(errors.join(" "));
-  return batch("reading-template", sourceFileName, plates);
+  return batch("reading-template", sourceFileName, plates, errors.map((error) => `未载入：${error}`));
 }
 
-export function createReadingTemplateWorkbook(template: PlateTemplateDefinition, plateCount = 1): ArrayBuffer {
+export function createReadingTemplateWorkbook(template: PlateTemplateDefinition, plateCount = 1, suppliedMetadata?: ManualReadingMetadata): ArrayBuffer {
+  const metadata: ManualReadingMetadata = suppliedMetadata ?? {
+    assayModuleId: "cell-viability",
+    assayMethodLabel: "细胞活性 / 细胞增殖",
+    detectionMode: "absorbance",
+    signalUnit: "OD",
+    wavelengthNm: null,
+  };
   const workbook = XLSX.utils.book_new();
   const instructions = [
     ["Microplate Assay Studio 孔板读数模板"],
     ["用途", "填写仪器截图、纸面记录或简化 Excel 中的原始终点读数。"],
     ["填写规则", "不要修改行列标签；空单元格表示未测孔，数字 0 表示真实读数。"],
     ["多块板", "每块板使用一个工作表；可复制板工作表后继续填写。"],
-    ["科学说明", "模板不推断实验方法、空白、对照、分组或重复；导入后请在系统中复核并注释。"],
+    ["科学说明", "模板记录用户报告的实验类型与通道，但不推断空白、对照、分组或重复；导入后请复核并注释。"],
     ["示例", "A1 可填 0.4586；未测孔保持空白。"],
   ];
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(instructions), "填写说明");
@@ -322,11 +341,15 @@ export function createReadingTemplateWorkbook(template: PlateTemplateDefinition,
     const rows: unknown[][] = [
       ["Microplate Assay Studio 原始读数"],
       ["plate_name", `培养板 ${plateIndex + 1}`],
-      ["detection_mode", "absorbance"],
-      ["signal_unit", "OD"],
-      ["wavelength_nm", ""],
+      ["assay_module", metadata.assayModuleId],
+      ["assay_method", metadata.assayMethodLabel],
+      ["detection_mode", metadata.detectionMode],
+      ["signal_unit", metadata.signalUnit],
+      ["wavelength_nm", metadata.wavelengthNm ?? ""],
+      ["excitation_nm", metadata.excitationWavelengthNm ?? ""],
+      ["emission_nm", metadata.emissionWavelengthNm ?? ""],
       [],
-      ["吸光值", ...Array.from({ length: template.columns }, (_, index) => index + 1)],
+      [metadata.detectionMode === "absorbance" ? "吸光值" : metadata.detectionMode === "fluorescence" ? "荧光值" : "发光值", ...Array.from({ length: template.columns }, (_, index) => index + 1)],
       ...Array.from({ length: template.rows }, (_, rowIndex) => [rowLabel(rowIndex), ...Array(template.columns).fill("")]),
     ];
     const sheet = XLSX.utils.aoa_to_sheet(rows);

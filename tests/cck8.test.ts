@@ -108,6 +108,18 @@ describe("CCK-8 analysis", () => {
     expect(result.significanceComparisons[0].note).toContain("Welch t-test");
   });
 
+  it("allows multiple biological replicates on one plate while warning about one-well-per-Bio patterns", () => {
+    const wells = [
+      makeWell("H10", 0.1, "blank"), makeWell("H11", 0.1, "blank"), makeWell("H12", 0.1, "blank"),
+      makeWell("A1", 0.3, "control", "Vehicle", "Bio1", "T1"),
+      makeWell("A2", 0.31, "control", "Vehicle", "Bio2", "T1"),
+      makeWell("A3", 0.32, "control", "Vehicle", "Bio3", "T1"),
+    ];
+    const result = analyzeCck8(wells, config);
+    expect(result.biologicalSummaries[0]).toMatchObject({ group: "Vehicle", nBiological: 3 });
+    expect(result.findings.some((finding) => finding.code === "REPLICATE_STRUCTURE_REVIEW")).toBe(true);
+  });
+
   it("blocks formal summaries when blank or experimental layout is incomplete", () => {
     const missingBlank = analyzeCck8([
       makeWell("A1", 0.2, "sample", "Drug", "B1", "T1"),
