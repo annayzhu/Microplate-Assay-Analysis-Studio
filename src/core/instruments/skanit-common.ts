@@ -179,6 +179,7 @@ export function buildParsedPlate(
     : primary.detectionMode;
   return {
     metadata: {
+      sourceKind: "instrument-file",
       sourceFileName: metadata.sourceFileName,
       sourceExperiment: metadata.sourceExperiment,
       runTimestamp: metadata.runTimestamp,

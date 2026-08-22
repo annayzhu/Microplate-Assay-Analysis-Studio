@@ -128,6 +128,7 @@ export function parseVictorLegacyWorkbook(bytes: ArrayBuffer, sourceFileName: st
 
   return {
     metadata: {
+      sourceKind: "instrument-file",
       sourceFileName,
       sourceExperiment: protocolName,
       runTimestamp,
@@ -161,4 +162,3 @@ export function parseVictorLegacyWorkbook(bytes: ArrayBuffer, sourceFileName: st
     warnings,
   };
 }
-

@@ -6,18 +6,22 @@ import {
   annotatedWellsCsv,
   assayMeasurementsCsv,
   biologicalSummaryCsv,
+  downloadBlob,
   downloadText,
   technicalSummaryCsv,
 } from "./core/export";
-import { parseMicroplateFile } from "./core/instruments";
+import { importPlateReadings } from "./core/instruments";
+import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
 import { applyLayoutText, layoutTemplateCsv, plateTemplateDefinitions, type LayoutPatch } from "./core/layout";
-import type { AnalysisConfig, AssayModuleId, BiologicalSummary, DetectionMode, ParsedPlate, SignificanceComparison, WellRecord, WellRole } from "./core/types";
+import type { AnalysisConfig, AssayModuleId, BiologicalSummary, DetectionMode, ParsedPlate, PlateImportBatch, SignificanceComparison, WellRecord, WellRole } from "./core/types";
 import { PlateMap } from "./components/PlateMap";
 import { SummaryChart } from "./components/SummaryChart";
 import { AssayDataExplorer } from "./components/AssayDataExplorer";
 
 type View = "import" | "layout" | "analysis";
+type ImportMode = "instrument" | "paste" | "template";
 type SelectionMode = "single" | "toggle" | "range";
+type PlateWorkspace = { plate: ParsedPlate; wells: WellRecord[] };
 type BatchDraft = {
   role: "" | WellRole;
   sampleId: string;
@@ -31,7 +35,7 @@ type BatchDraft = {
   notes: string;
 };
 
-const wellRoles: WellRole[] = ["sample", "control", "qc", "blank", "standard"];
+const wellRoles: WellRole[] = ["unassigned", "sample", "control", "qc", "blank", "standard"];
 const analyzableGroupRoles: WellRole[] = ["sample", "control"];
 
 const defaultAnalysisConfig: AnalysisConfig = {
@@ -64,7 +68,7 @@ function detectionModeLabel(mode: DetectionMode): string {
 }
 
 function methodEvidenceLabel(plate: ParsedPlate): string {
-  return ({ reported: "仪器协议明确记录", inferred: "根据通道与当前流程推断，请复核", unknown: "文件未提供" })[plate.metadata.assayMethodEvidence];
+  return ({ reported: "仪器协议明确记录", "user-reported": "由用户在导入时填写", inferred: "根据通道与当前流程推断，请复核", unknown: "文件未提供" })[plate.metadata.assayMethodEvidence];
 }
 
 function measurementChannel(plate: ParsedPlate): string {
@@ -122,7 +126,7 @@ const summaryTableColumns: Array<{ key: string; header: string; render: (row: Bi
 ];
 
 function roleLabel(role: WellRole): string {
-  return ({ sample: "样本", control: "对照", qc: "质控", blank: "空白", standard: "标准品" })[role];
+  return ({ unassigned: "未指定", sample: "样本", control: "对照", qc: "质控", blank: "空白", standard: "标准品" })[role];
 }
 
 function downloadName(source: string, suffix: string): string {
@@ -154,12 +158,21 @@ function templateIdForPlate(plate: ParsedPlate): string {
 
 export default function App() {
   const instrumentInput = useRef<HTMLInputElement>(null);
+  const readingTemplateInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<View>("import");
+  const [importMode, setImportMode] = useState<ImportMode>("instrument");
   const [selectedModuleId, setSelectedModuleId] = useState<AssayModuleId>("cell-viability");
   const [moduleSelectionTouched, setModuleSelectionTouched] = useState(false);
-  const [plate, setPlate] = useState<ParsedPlate | null>(null);
-  const [wells, setWells] = useState<WellRecord[]>([]);
+  const [plateWorkspaces, setPlateWorkspaces] = useState<PlateWorkspace[]>([]);
+  const [activePlateIndex, setActivePlateIndex] = useState(0);
+  const [pendingBatch, setPendingBatch] = useState<PlateImportBatch | null>(null);
+  const [manualText, setManualText] = useState("");
+  const [manualDetectionMode, setManualDetectionMode] = useState<DetectionMode>("absorbance");
+  const [manualSignalUnit, setManualSignalUnit] = useState("OD");
+  const [manualWavelength, setManualWavelength] = useState("450");
+  const [readingTemplateId, setReadingTemplateId] = useState(defaultLayoutTemplateId);
+  const [readingTemplatePlateCount, setReadingTemplatePlateCount] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [layoutTemplateId, setLayoutTemplateId] = useState(defaultLayoutTemplateId);
@@ -172,6 +185,9 @@ export default function App() {
   const [error, setError] = useState("");
   const [config, setConfig] = useState<AnalysisConfig>(defaultAnalysisConfig);
   const selectedModule = assayModules.find((module) => module.id === selectedModuleId) ?? assayModules[0];
+  const activeWorkspace = plateWorkspaces[activePlateIndex];
+  const plate = activeWorkspace?.plate ?? null;
+  const wells = activeWorkspace?.wells ?? [];
 
   const groups = useMemo(() => [...new Set(wells.filter((well) => analyzableGroupRoles.includes(well.role)).map((well) => well.group).filter(Boolean))].sort(), [wells]);
   const inferredControlGroup = useMemo(() => {
@@ -196,6 +212,16 @@ export default function App() {
   const selectedTemplate = plateTemplateDefinitions.find((template) => template.id === layoutTemplateId)
     ?? plateTemplateDefinitions.find((template) => template.id === defaultLayoutTemplateId)
     ?? plateTemplateDefinitions[0];
+  const selectedReadingTemplate = plateTemplateDefinitions.find((template) => template.id === readingTemplateId)
+    ?? plateTemplateDefinitions.find((template) => template.id === defaultLayoutTemplateId)
+    ?? plateTemplateDefinitions[0];
+  const manualMetadata: ManualReadingMetadata = {
+    assayModuleId: selectedModuleId,
+    assayMethodLabel: selectedModule.name,
+    detectionMode: manualDetectionMode,
+    signalUnit: manualSignalUnit.trim() || (manualDetectionMode === "absorbance" ? "OD" : "Signal"),
+    wavelengthNm: manualWavelength.trim() && Number.isFinite(Number(manualWavelength)) ? Number(manualWavelength) : null,
+  };
   const summaryKeySignature = useMemo(() => analysis.biologicalSummaries.map((row) => row.key).join("\n"), [analysis.biologicalSummaries]);
   const displayedBiologicalSummaries = useMemo(() => selectedSummaryKeys.size
     ? analysis.biologicalSummaries.filter((row) => selectedSummaryKeys.has(row.key))
@@ -254,33 +280,101 @@ export default function App() {
     });
   }, [summaryKeySignature]);
 
+  function resetPlateInteraction(nextPlate: ParsedPlate) {
+    setSelected(new Set());
+    setSelectedSummaryKeys(new Set());
+    setSelectionAnchor(null);
+    setLayoutTemplateId(templateIdForPlate(nextPlate));
+    setControlGroupTouched(false);
+    setConfig((current) => ({ ...current, controlGroup: "" }));
+  }
+
+  function loadBatch(batch: PlateImportBatch) {
+    const first = batch.plates[0];
+    if (!first) return;
+    setPlateWorkspaces(batch.plates.map((item) => ({ plate: item, wells: item.wells })));
+    setActivePlateIndex(0);
+    setPendingBatch(null);
+    resetPlateInteraction(first);
+    const detectedModuleId = first.metadata.assayModuleId ?? first.assayData?.moduleId ?? "unknown";
+    const detectedModule = assayModules.find((module) => module.id === detectedModuleId);
+    if (batch.sourceKind === "instrument-file" && !moduleSelectionTouched && detectedModule) {
+      setSelectedModuleId(detectedModule.id as AssayModuleId);
+    }
+    if (batch.sourceKind === "instrument-file" && moduleSelectionTouched && detectedModuleId !== "unknown" && detectedModuleId !== selectedModuleId) {
+      setError(`所选模块为“${selectedModule.name}”，但文件识别为“${detectedModule?.name ?? first.metadata.assayMethodLabel}”。结果仍已载入，请复核实验类型或切换模块。`);
+    }
+    setNotice(`已载入 ${batch.plates.length} 块板，共 ${batch.plates.reduce((sum, item) => sum + item.wells.length, 0)} 个已测孔。请先复核基本信息与数据来源。`);
+    setView("import");
+  }
+
+  function updateActiveWells(updater: WellRecord[] | ((current: WellRecord[]) => WellRecord[])) {
+    setPlateWorkspaces((current) => current.map((workspace, index) => index === activePlateIndex
+      ? { ...workspace, wells: typeof updater === "function" ? updater(workspace.wells) : updater }
+      : workspace));
+  }
+
+  function selectActivePlate(index: number) {
+    const next = plateWorkspaces[index];
+    if (!next) return;
+    setActivePlateIndex(index);
+    resetPlateInteraction(next.plate);
+    setNotice(`已切换到 ${next.plate.metadata.plateName}；该板的注释和分析状态独立保存。`);
+  }
+
+  function renameActivePlate(name: string) {
+    setPlateWorkspaces((current) => current.map((workspace, index) => index === activePlateIndex
+      ? { ...workspace, plate: { ...workspace.plate, metadata: { ...workspace.plate.metadata, plateName: name, sourceExperiment: name } } }
+      : workspace));
+  }
+
   async function importInstrumentFile(file: File) {
     setLoading(true);
     setError("");
     setNotice("");
     try {
-      const parsed = await parseMicroplateFile(file);
-      const detectedModuleId = parsed.metadata.assayModuleId ?? parsed.assayData?.moduleId ?? "unknown";
-      const detectedModule = assayModules.find((module) => module.id === detectedModuleId);
-      setPlate(parsed);
-      setWells(parsed.wells);
-      setSelected(new Set());
-      setSelectedSummaryKeys(new Set());
-      setSelectionAnchor(null);
-      setLayoutTemplateId(templateIdForPlate(parsed));
-      setControlGroupTouched(false);
-      setConfig((current) => ({ ...current, controlGroup: "" }));
-      if (!moduleSelectionTouched && detectedModule) setSelectedModuleId(detectedModule.id as AssayModuleId);
-      if (moduleSelectionTouched && detectedModuleId !== "unknown" && detectedModuleId !== selectedModuleId) {
-        setError(`所选模块为“${selectedModule.name}”，但文件识别为“${detectedModule?.name ?? parsed.metadata.assayMethodLabel}”。结果仍已载入，请复核实验类型或切换模块。`);
-      }
-      setNotice(`已识别 ${parsed.metadata.assayMethodLabel} · ${detectionModeLabel(parsed.metadata.detectionMode)}读数，共 ${parsed.wells.length} 个已测孔。请先复核本次实验基本信息。`);
-      setView("import");
+      loadBatch(await importPlateReadings({ kind: "instrument-file", file }));
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "文件导入失败。");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function previewManualPaste() {
+    setError("");
+    setNotice("");
+    try {
+      const result = await importPlateReadings({ kind: "manual-paste", text: manualText, metadata: manualMetadata });
+      setPendingBatch(result);
+      setNotice(`解析完成：识别到 ${result.plates.length} 块板。确认预览无误后再载入工作区。`);
+    } catch (importError) {
+      setPendingBatch(null);
+      setError(importError instanceof Error ? importError.message : "粘贴内容解析失败。");
+    }
+  }
+
+  async function previewReadingTemplate(file: File) {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await importPlateReadings({ kind: "reading-template", file, metadata: manualMetadata });
+      setPendingBatch(result);
+      setNotice(`模板解析完成：识别到 ${result.plates.length} 块板。确认预览无误后再载入工作区。`);
+    } catch (importError) {
+      setPendingBatch(null);
+      setError(importError instanceof Error ? importError.message : "读数模板解析失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function downloadReadingTemplate() {
+    const bytes = createReadingTemplateWorkbook(selectedReadingTemplate, readingTemplatePlateCount);
+    downloadBlob(
+      `microplate-reading-template-${selectedReadingTemplate.id}well-${readingTemplatePlateCount}plate.xlsx`,
+      new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    );
   }
 
   function toggleWell(well: string, mode: SelectionMode) {
@@ -335,7 +429,7 @@ export default function App() {
     if (batchDraft.notes) patch.notes = batchDraft.notes;
     const ordered = [...selectedWells].sort((a, b) => a.row.localeCompare(b.row) || a.column - b.column);
     const technicalByWell = new Map(ordered.map((well, index) => [well.well, `T${index + 1}`]));
-    setWells((current) => current.map((well) => selected.has(well.well)
+    updateActiveWells((current) => current.map((well) => selected.has(well.well)
       ? { ...well, ...patch, technicalReplicate: autoNumberTechnical && !batchDraft.technicalReplicate ? technicalByWell.get(well.well) ?? well.technicalReplicate : (patch.technicalReplicate ?? well.technicalReplicate) }
       : well));
     setNotice(`已更新 ${selected.size} 个孔；原始读数未改变。`);
@@ -343,7 +437,7 @@ export default function App() {
 
   function setSelectedExclusion(excluded: boolean) {
     if (!selected.size) return;
-    setWells((current) => current.map((well) => selected.has(well.well) ? { ...well, excluded } : well));
+    updateActiveWells((current) => current.map((well) => selected.has(well.well) ? { ...well, excluded } : well));
     setBatchDraft((current) => ({ ...current, excluded: excluded ? "true" : "false" }));
     setNotice(excluded ? `已将 ${selected.size} 个孔标记为排除；原始读数未改变。` : `已将 ${selected.size} 个孔恢复为纳入分析；原始读数未改变。`);
   }
@@ -359,7 +453,7 @@ export default function App() {
 
   async function importLayoutFile(file: File) {
     const result = applyLayoutText(wells, await file.text());
-    setWells(result.wells);
+    updateActiveWells(result.wells);
     setControlGroupTouched(false);
     setConfig((current) => ({ ...current, controlGroup: "" }));
     setNotice(`板图已匹配 ${result.applied} 个孔。${result.warnings.length ? `另有 ${result.warnings.length} 条提醒。` : ""}`);
@@ -369,9 +463,9 @@ export default function App() {
   function exportFiles(kind: "wells" | "technical" | "biological" | "package") {
     if (!plate) return;
     const name = plate.metadata.sourceFileName;
-    if (kind === "wells") downloadText(downloadName(name, `annotated-wells-${exportScope}.csv`), annotatedWellsCsv(displayedAnalysis), "text/csv");
-    if (kind === "technical") downloadText(downloadName(name, `technical-summary-${exportScope}.csv`), technicalSummaryCsv(displayedAnalysis), "text/csv");
-    if (kind === "biological") downloadText(downloadName(name, `biological-summary-${exportScope}.csv`), biologicalSummaryCsv(displayedAnalysis), "text/csv");
+    if (kind === "wells") downloadText(downloadName(name, `annotated-wells-${exportScope}.csv`), annotatedWellsCsv(displayedAnalysis, plate), "text/csv");
+    if (kind === "technical") downloadText(downloadName(name, `technical-summary-${exportScope}.csv`), technicalSummaryCsv(displayedAnalysis, plate), "text/csv");
+    if (kind === "biological") downloadText(downloadName(name, `biological-summary-${exportScope}.csv`), biologicalSummaryCsv(displayedAnalysis, plate), "text/csv");
     if (kind === "package") downloadText(downloadName(name, "analysis-package.json"), analysisPackageJson(plate, wells, config, analysis), "application/json");
   }
 
@@ -379,7 +473,7 @@ export default function App() {
     <header className="topbar">
       <button className="brand" type="button" onClick={() => setView("import")}>
         <span className="brand-mark"><i /><i /><i /><i /></span>
-        <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v0.1</small></span>
+        <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v0.2</small></span>
       </button>
       <div className="topbar-actions">
         <span className="privacy-pill"><i />Browser-local</span>
@@ -410,17 +504,51 @@ export default function App() {
 
       {view === "import" ? <section className="workspace import-workspace">
         <div className="section-heading">
-          <div><p className="eyebrow">01 · INSTRUMENT DATA</p><h2>导入仪器原始文件</h2><p>当前模块：{selectedModule.name} · {selectedModule.measurementTarget}。系统会自动复核文件中的实验类型，并分开保存仪器测量值与 SkanIt 计算结果。</p></div>
+          <div><p className="eyebrow">01 · PLATE READINGS</p><h2>导入孔板读数</h2><p>当前模块：{selectedModule.name} · {selectedModule.measurementTarget}。可以导入仪器结果，也可以粘贴 Excel 矩阵或填写标准读数模板；全部数据只在浏览器本地处理。</p></div>
           {plate ? <span className="adapter-badge">{plate.metadata.adapterId}</span> : null}
         </div>
-        <input ref={instrumentInput} hidden type="file" accept=".xml,.xlsx,.xls,.skax" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importInstrumentFile(file); event.target.value = ""; }} />
-        <button type="button" className="dropzone" disabled={loading} onClick={() => instrumentInput.current?.click()}>
-          <span className="dropzone-icon">DATA</span>
-          <span><strong>{loading ? "正在解析…" : plate ? "更换仪器文件" : "选择酶标仪导出文件"}</strong><small>支持 SkanIt XML / XLSX、旧版 XLS；SKAX 会话包请在 SkanIt 中导出 XML 或 XLSX 后分析。文件不会上传到服务器。</small></span>
-          <b>Browse</b>
-        </button>
+        <div className="import-source-tabs" role="tablist" aria-label="孔板读数来源">
+          <button type="button" role="tab" aria-selected={importMode === "instrument"} className={importMode === "instrument" ? "active" : ""} onClick={() => { setImportMode("instrument"); setPendingBatch(null); }}>仪器结果文件</button>
+          <button type="button" role="tab" aria-selected={importMode === "paste"} className={importMode === "paste" ? "active" : ""} onClick={() => { setImportMode("paste"); setPendingBatch(null); }}>粘贴孔板读数</button>
+          <button type="button" role="tab" aria-selected={importMode === "template"} className={importMode === "template" ? "active" : ""} onClick={() => { setImportMode("template"); setPendingBatch(null); }}>读数模板</button>
+        </div>
+
+        {importMode === "instrument" ? <>
+          <input ref={instrumentInput} hidden type="file" accept=".xml,.xlsx,.xls,.skax" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importInstrumentFile(file); event.target.value = ""; }} />
+          <button type="button" className="dropzone" disabled={loading} onClick={() => instrumentInput.current?.click()}>
+            <span className="dropzone-icon">DATA</span>
+            <span><strong>{loading ? "正在解析…" : plate ? "更换仪器文件" : "选择酶标仪导出文件"}</strong><small>支持 SkanIt XML / XLSX、旧版 XLS；SKAX 会话包请在 SkanIt 中导出 XML 或 XLSX 后分析。</small></span>
+            <b>Browse</b>
+          </button>
+        </> : <div className="manual-import-panel">
+          <div className="manual-metadata-grid">
+            <Field label="检测模式 *"><select value={manualDetectionMode} onChange={(event) => { const mode = event.target.value as DetectionMode; setManualDetectionMode(mode); setManualSignalUnit(mode === "absorbance" ? "OD" : mode === "fluorescence" ? "RFU" : "RLU"); }}><option value="absorbance">吸光</option><option value="fluorescence">荧光</option><option value="luminescence">发光</option><option value="trf">时间分辨荧光</option><option value="alpha">Alpha</option></select></Field>
+            <Field label="信号单位 *"><input value={manualSignalUnit} onChange={(event) => setManualSignalUnit(event.target.value)} placeholder="OD / RFU / RLU" /></Field>
+            <Field label="检测波长 (nm)"><input type="number" min="0" value={manualWavelength} disabled={manualDetectionMode !== "absorbance"} onChange={(event) => setManualWavelength(event.target.value)} placeholder="例如 450" /><small className="field-help">由用户填写；系统不会根据数值猜测。</small></Field>
+          </div>
+          {importMode === "paste" ? <>
+            <label className="manual-paste-field"><span>从 Excel 复制固定孔板矩阵</span><textarea aria-label="粘贴孔板读数" value={manualText} onChange={(event) => setManualText(event.target.value)} placeholder={"吸光值\t1\t2\t3\t…\t12\nA\t0.4586\t0.4725\t0.4509\t…\nB\t0.4542\t0.4696\t0.4512\t…\n…\nH\t0.4546\t0.4572\t0.4582\t…"} /></label>
+            <div className="manual-import-actions"><p>允许在同一粘贴内容中连续出现多块板。空格表示未测，数字 0 会作为真实读数保留。</p><button type="button" className="primary-button" disabled={!manualText.trim()} onClick={() => void previewManualPaste()}>解析并预览</button></div>
+          </> : <>
+            <div className="template-builder">
+              <Field label="读数模板板型"><select value={readingTemplateId} onChange={(event) => setReadingTemplateId(event.target.value)}>{plateTemplateDefinitions.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></Field>
+              <Field label="板数量"><input type="number" min="1" max="12" value={readingTemplatePlateCount} onChange={(event) => setReadingTemplatePlateCount(Math.max(1, Math.min(12, Number(event.target.value) || 1)))} /></Field>
+              <button type="button" className="secondary-button" onClick={downloadReadingTemplate}>下载读数模板</button>
+            </div>
+            <input ref={readingTemplateInput} hidden type="file" accept=".xlsx" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewReadingTemplate(file); event.target.value = ""; }} />
+            <button type="button" className="dropzone compact-dropzone" disabled={loading} onClick={() => readingTemplateInput.current?.click()}><span className="dropzone-icon">XLSX</span><span><strong>{loading ? "正在解析…" : "导入已填写的读数模板"}</strong><small>每块板使用一个工作表；也支持一个工作表内连续排列多个固定矩阵。</small></span><b>Browse</b></button>
+          </>}
+        </div>}
+
+        {pendingBatch ? <div className="import-preview" aria-label="导入预览">
+          <div className="import-preview-head"><div><h3>导入预览</h3><p>识别到 {pendingBatch.plates.length} 块独立孔板；确认后才会替换当前工作区。</p></div><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : "读数模板"}</span></div>
+          <div className="preview-plate-list">{pendingBatch.plates.map((item, index) => <div key={`${item.metadata.plateName}-${index}`}><strong>{item.metadata.plateName}</strong><span>{item.rows} × {item.columns}</span><b>{item.wells.length} 个已测孔</b><small>{item.warnings[0] || "矩阵完整"}</small></div>)}</div>
+          <div className="manual-import-actions"><button type="button" className="secondary-button" onClick={() => setPendingBatch(null)}>取消</button><button type="button" className="primary-button" onClick={() => loadBatch(pendingBatch)}>确认载入 {pendingBatch.plates.length} 块板</button></div>
+        </div> : null}
+
+        {plateWorkspaces.length > 1 ? <div className="plate-switcher"><div><strong>本次导入包含 {plateWorkspaces.length} 块板</strong><small>各板注释与分析相互独立，不会自动合并为生物学重复。</small></div><div className="plate-switcher-buttons">{plateWorkspaces.map((workspace, index) => <button type="button" key={`${workspace.plate.metadata.plateName}-${index}`} className={index === activePlateIndex ? "active" : ""} onClick={() => selectActivePlate(index)}>{index + 1}. {workspace.plate.metadata.plateName}</button>)}</div><label>当前板名称<input value={plate?.metadata.plateName ?? ""} onChange={(event) => renameActivePlate(event.target.value)} /></label></div> : null}
         {plate ? <div className="experiment-overview">
-          <div className="experiment-overview-head"><div><h3>本次实验基本信息</h3><p>优先显示仪器文件明确记录的信息；推断项会单独标明，不将波长等同于实验方法。</p></div><span className={`evidence-badge ${plate.metadata.assayMethodEvidence}`}>{plate.metadata.assayMethodEvidence === "reported" ? "协议已记录" : "需复核"}</span></div>
+          <div className="experiment-overview-head"><div><h3>本次实验基本信息</h3><p>仪器报告值、用户填写值和推断项会分别标明；人工读数不会伪装成仪器元数据。</p></div><span className={`evidence-badge ${plate.metadata.assayMethodEvidence}`}>{plate.metadata.assayMethodEvidence === "reported" ? "协议已记录" : plate.metadata.assayMethodEvidence === "user-reported" ? "用户已填写" : "需复核"}</span></div>
           <div className="metadata-grid experiment-metadata-grid">
             <Metric label="实验方法" value={plate.metadata.assayMethodLabel} detail={methodEvidenceLabel(plate)} />
             <Metric label="检测模式" value={detectionModeLabel(plate.metadata.detectionMode)} detail={`${plate.metadata.measurementName || "未命名通道"} · ${plate.metadata.signalUnit || "无单位"}`} />
@@ -452,7 +580,7 @@ export default function App() {
           <div className="panel plate-panel">
             <div className="panel-head"><div><h3>{plate.rows * plate.columns}孔板 · {plate.wells.length}个已测孔</h3><p>普通点击单选；Shift 点头尾选择矩形区域；Ctrl / Command 逐个增减。</p></div><span>{selected.size} selected</span></div>
             <PlateMap wells={wells} selected={selected} onToggle={toggleWell} plateRows={plate.rows} plateColumns={plate.columns} signalLabel={rawSignalLabel(plate)} />
-            <div className="plate-legend"><span className="sample">样本 {roleCounts.sample}</span><span className="control">对照 {roleCounts.control}</span><span className="standard">标准品 {roleCounts.standard}</span><span className="qc">质控 {roleCounts.qc}</span><span className="blank">空白 {roleCounts.blank}</span><span>颜色深浅表示原始读数，不表示分组。</span></div>
+            <div className="plate-legend"><span className="unassigned">未指定 {roleCounts.unassigned}</span><span className="sample">样本 {roleCounts.sample}</span><span className="control">对照 {roleCounts.control}</span><span className="standard">标准品 {roleCounts.standard}</span><span className="qc">质控 {roleCounts.qc}</span><span className="blank">空白 {roleCounts.blank}</span><span>颜色深浅表示原始读数，不表示分组。</span></div>
           </div>
           <aside className="panel annotation-panel">
             <div className="panel-head"><div><h3>批量注释</h3><p>{selected.size ? `将更新 ${selected.size} 个孔；留空字段保持原值。` : "先在板图中选择一个或多个孔。"}</p></div></div>
@@ -483,6 +611,7 @@ export default function App() {
               </> : selectedWells.length ? <>
                 <div className="well-detail-title"><strong>{selectedWells.length} 个孔</strong><span>{selectedExcludedCount ? `${selectedExcludedCount} 个已排除` : "全部纳入"}</span></div>
                 <dl>
+                  <div><dt>未指定</dt><dd>{selectedRoleCounts.unassigned}</dd></div>
                   <div><dt>样本</dt><dd>{selectedRoleCounts.sample}</dd></div>
                   <div><dt>对照</dt><dd>{selectedRoleCounts.control}</dd></div>
                   <div><dt>质控</dt><dd>{selectedRoleCounts.qc}</dd></div>
@@ -492,6 +621,7 @@ export default function App() {
               </> : <p>点击孔位后，这里会显示当前孔的注释和读数。</p>}
             </div>
             <div className="quick-selects">
+              <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "unassigned").map((well) => well.well)))}>选择未指定孔</button>
               <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "sample" && !well.group).map((well) => well.well)))}>选择未分组样本</button>
               <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "blank").map((well) => well.well)))}>选择空白孔</button>
               <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.excluded).map((well) => well.well)))}>选择已排除孔</button>
@@ -499,7 +629,7 @@ export default function App() {
               <button type="button" onClick={() => { setSelected(new Set()); setSelectionAnchor(null); }}>清除选择</button>
             </div>
             <div className={blankAnnotationMode ? "form-grid blank-form-grid" : "form-grid"}>
-              <Field label="孔角色"><select value={batchDraft.role} onChange={(event) => setBatchDraft({ ...batchDraft, role: event.target.value as BatchDraft["role"] })}><option value="">保持原值</option><option value="sample">样本</option><option value="control">对照</option><option value="standard">标准品</option><option value="qc">质控</option><option value="blank">空白</option></select></Field>
+              <Field label="孔角色"><select value={batchDraft.role} onChange={(event) => setBatchDraft({ ...batchDraft, role: event.target.value as BatchDraft["role"] })}><option value="">保持原值</option><option value="unassigned">未指定</option><option value="sample">样本</option><option value="control">对照</option><option value="standard">标准品</option><option value="qc">质控</option><option value="blank">空白</option></select></Field>
               {!blankAnnotationMode ? <>
                 <Field label="分组 · Group *"><input value={batchDraft.group} onChange={(event) => setBatchDraft({ ...batchDraft, group: event.target.value })} placeholder="NC / siGENE" /></Field>
                 <Field label="样本ID"><input value={batchDraft.sampleId} onChange={(event) => setBatchDraft({ ...batchDraft, sampleId: event.target.value })} placeholder="A549_NC_B1" /></Field>
@@ -517,7 +647,7 @@ export default function App() {
             {selectedWells.length ? <div className="selected-preview"><strong>所选孔{selectedExcludedCount ? ` · ${selectedExcludedCount} 个已排除` : ""}</strong><p>{selectedWells.map((well) => well.well).join(", ")}</p></div> : null}
           </aside>
         </div>
-        <div className="next-step"><div><strong>{analysis.findings.some((finding) => finding.code === "LAYOUT_INCOMPLETE") ? "板图尚未完成" : "板图具备基础分析条件"}</strong><p>只有分组和生物学重复齐全后，结果才会进入正式汇总。</p></div><button type="button" className="primary-button" onClick={() => setView("analysis")}>进入分析</button></div>
+        <div className="next-step"><div><strong>{analysis.findings.some((finding) => finding.code === "LAYOUT_INCOMPLETE" || finding.code === "ROLE_UNASSIGNED") ? "板图尚未完成" : "板图具备基础分析条件"}</strong><p>只有孔角色、分组和生物学重复齐全后，结果才会进入正式汇总。</p></div><button type="button" className="primary-button" onClick={() => setView("analysis")}>进入分析</button></div>
       </section> : null}
 
       {view === "analysis" && plate && useGenericWorkflow && plate.assayData ? <section className="workspace analysis-workspace">

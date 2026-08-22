@@ -1,7 +1,8 @@
 export type DetectionMode = "absorbance" | "fluorescence" | "luminescence" | "trf" | "alpha";
 export type CellViabilityMethod = "cck8" | "mtt" | "resazurin" | "alamarblue" | "unknown";
-export type MetadataEvidence = "reported" | "inferred" | "unknown";
-export type WellRole = "sample" | "control" | "qc" | "blank" | "standard";
+export type MetadataEvidence = "reported" | "user-reported" | "inferred" | "unknown";
+export type WellRole = "unassigned" | "sample" | "control" | "qc" | "blank" | "standard";
+export type PlateImportSource = "instrument-file" | "manual-paste" | "reading-template";
 export type AssayStatus = "ready" | "planned";
 export type AssayModuleId = "cell-viability" | "protein-quant" | "atp-quant" | "elisa" | "luciferase" | "microbial-growth" | "advanced-binding" | "unknown";
 export type MeasurementKind = "endpoint" | "kinetic" | "spectrum" | "derived" | "replicate-summary";
@@ -18,6 +19,7 @@ export type AssayModuleDefinition = {
 };
 
 export type PlateMetadata = {
+  sourceKind: PlateImportSource;
   sourceFileName: string;
   sourceExperiment: string;
   runTimestamp: string;
@@ -46,6 +48,14 @@ export type PlateMetadata = {
   adapterId: string;
   assayModuleId?: AssayModuleId;
   softwareVersion?: string;
+};
+
+export type PlateImportBatch = {
+  id: string;
+  sourceKind: PlateImportSource;
+  sourceName: string;
+  plates: ParsedPlate[];
+  warnings: string[];
 };
 
 export type MeasurementPoint = {
