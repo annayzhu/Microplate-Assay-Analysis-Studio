@@ -15,6 +15,22 @@ page.on("console", (message) => {
 });
 page.on("pageerror", (error) => consoleErrors.push(error.message));
 
+async function dragBetweenWells(startWell, endWell, additive = false, selectingScreenshot = "") {
+  const start = await page.locator(`[data-well="${startWell}"]`).boundingBox();
+  const end = await page.locator(`[data-well="${endWell}"]`).boundingBox();
+  if (!start || !end) throw new Error(`Could not locate drag endpoints ${startWell} → ${endWell}`);
+  if (additive) await page.keyboard.down("Control");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 8 });
+  if (selectingScreenshot) {
+    await page.locator(".plate-selection-box").waitFor();
+    await page.screenshot({ path: resolve(screenshotDir, selectingScreenshot), fullPage: false });
+  }
+  await page.mouse.up();
+  if (additive) await page.keyboard.up("Control");
+}
+
 try {
   await page.goto("http://127.0.0.1:4178/", { waitUntil: "networkidle" });
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-start.png"), fullPage: true });
@@ -56,7 +72,42 @@ try {
   for (const signal of ["96孔板 · 96个已测孔", "未指定 96", "板图尚未完成"]) {
     if (!manualLayoutText.includes(signal)) throw new Error(`Manual-paste layout is missing expected signal: ${signal}`);
   }
+  await dragBetweenWells("A1", "C3", false, "microplate-studio-box-selecting.png");
+  await page.getByText("9 个已选", { exact: true }).waitFor();
+  await dragBetweenWells("D1", "D2", true);
+  await page.getByText("11 个已选", { exact: true }).waitFor();
+  await page.keyboard.down("Control");
+  await page.locator('[data-well="A1"]').click();
+  await page.keyboard.up("Control");
+  await page.getByText("10 个已选", { exact: true }).waitFor();
+
+  const zoomBefore = await page.locator(".plate-scroll").getAttribute("data-zoom");
+  await page.getByRole("button", { name: "缩小孔板" }).click();
+  const zoomAfter = await page.locator(".plate-scroll").getAttribute("data-zoom");
+  if (Number(zoomAfter) !== Number(zoomBefore) - 10) throw new Error(`Zoom did not step down by 10%: ${zoomBefore} → ${zoomAfter}`);
+  await page.getByRole("button", { name: "重置为百分之百" }).click();
+  if (await page.locator(".plate-scroll").getAttribute("data-zoom") !== "100") throw new Error("Zoom reset did not return to 100%.");
+
+  await page.getByLabel("分组 · Group *").fill("ManualGroup");
+  await page.getByLabel("生物学重复 *").fill("Bio1");
+  await page.getByText("尚未应用", { exact: true }).waitFor();
+  await page.locator('[data-well="H12"]').click();
+  if (await page.getByLabel("分组 · Group *").inputValue() !== "ManualGroup") throw new Error("Draft did not persist after changing the selected wells.");
+  await page.getByRole("button", { name: "应用到所选 1 个孔" }).click();
+  await page.getByText("已应用", { exact: true }).waitFor();
+  await page.getByLabel("分组 · Group *").fill("尚未保存的分组");
+  let dirtyPromptSeen = false;
+  page.once("dialog", async (dialog) => { dirtyPromptSeen = true; await dialog.dismiss(); });
+  await page.locator(".workspace-nav").getByRole("button", { name: /分析与导出/ }).click();
+  if (!dirtyPromptSeen || !await page.getByRole("heading", { name: "板图与实验注释" }).isVisible()) throw new Error("Dirty annotation draft was not protected before navigation.");
+  await page.getByRole("button", { name: "清空填写" }).click();
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-manual-layout.png"), fullPage: true });
+  await page.setViewportSize({ width: 980, height: 1000 });
+  const compactPlate = await page.locator(".plate-panel").boundingBox();
+  const compactAnnotation = await page.locator(".annotation-panel").boundingBox();
+  if (!compactPlate || !compactAnnotation || compactAnnotation.y <= compactPlate.y) throw new Error("Narrow layout did not move the annotation panel below the plate.");
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-narrow.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");

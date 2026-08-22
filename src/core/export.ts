@@ -84,7 +84,7 @@ export function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate?
 export function analysisPackageJson(plate: ParsedPlate, wells: WellRecord[], config: AnalysisConfig, result: CellViabilityAnalysisResult): string {
   return JSON.stringify({
     schemaVersion: 1,
-    tool: { id: "microplate-assay-studio", version: "0.2.0" },
+    tool: { id: "microplate-assay-studio", version: "0.3.0" },
     assay: { id: "cell-viability", label: plate.metadata.assayMethodLabel },
     generatedAt: new Date().toISOString(),
     source: plate.metadata,

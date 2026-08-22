@@ -33,9 +33,20 @@ try {
   for (const signal of ["离线验证板", "96 个已测孔", "用户已填写", "人工录入"]) {
     if (!visibleText.includes(signal)) throw new Error(`Fresh offline package is missing expected signal: ${signal}`);
   }
+  await page.getByRole("button", { name: "进入板图与注释" }).click();
+  const start = await page.locator('[data-well="A1"]').boundingBox();
+  const end = await page.locator('[data-well="B2"]').boundingBox();
+  if (!start || !end) throw new Error("Offline plate map did not render selection targets.");
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await page.getByText("4 个已选", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "缩小孔板" }).click();
+  if (await page.locator(".plate-scroll").getAttribute("data-zoom") !== "90") throw new Error("Offline zoom control did not step to 90%.");
   if (screenshotPath) await page.screenshot({ path: resolve(screenshotPath), fullPage: true });
   if (consoleErrors.length) throw new Error(`Offline page reported browser errors:\n${consoleErrors.join("\n")}`);
-  console.log(JSON.stringify({ title: await page.title(), validatedSignals: ["离线验证板", "96 个已测孔", "用户已填写", "人工录入"], consoleErrors }, null, 2));
+  console.log(JSON.stringify({ title: await page.title(), validatedSignals: ["离线验证板", "96 个已测孔", "用户已填写", "人工录入", "4-well box selection", "90% zoom"], consoleErrors }, null, 2));
 } finally {
   await browser.close();
 }

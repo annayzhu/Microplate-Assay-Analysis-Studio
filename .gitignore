@@ -6,3 +6,6 @@ coverage/
 .DS_Store
 酶标仪demo/
 tests/fixtures/*.xlsx
+tests/fixtures/*.xls
+tests/fixtures/*.xml
+tests/fixtures/*.skax

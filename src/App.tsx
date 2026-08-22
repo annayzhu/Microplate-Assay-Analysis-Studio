@@ -20,8 +20,13 @@ import { AssayDataExplorer } from "./components/AssayDataExplorer";
 
 type View = "import" | "layout" | "analysis";
 type ImportMode = "instrument" | "paste" | "template";
-type SelectionMode = "single" | "toggle" | "range";
-type PlateWorkspace = { plate: ParsedPlate; wells: WellRecord[] };
+type DraftStatus = "idle" | "dirty" | "applied";
+type PlateWorkspace = {
+  plate: ParsedPlate;
+  wells: WellRecord[];
+  zoom: number;
+  zoomManuallyChanged: boolean;
+};
 type BatchDraft = {
   role: "" | WellRole;
   sampleId: string;
@@ -177,6 +182,8 @@ export default function App() {
   const [selectionAnchor, setSelectionAnchor] = useState<string | null>(null);
   const [layoutTemplateId, setLayoutTemplateId] = useState(defaultLayoutTemplateId);
   const [batchDraft, setBatchDraft] = useState<BatchDraft>(emptyBatchDraft);
+  const [draftStatus, setDraftStatus] = useState<DraftStatus>("idle");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [autoNumberTechnical, setAutoNumberTechnical] = useState(true);
   const [selectedSummaryKeys, setSelectedSummaryKeys] = useState<Set<string>>(new Set());
   const [controlGroupTouched, setControlGroupTouched] = useState(false);
@@ -188,6 +195,7 @@ export default function App() {
   const activeWorkspace = plateWorkspaces[activePlateIndex];
   const plate = activeWorkspace?.plate ?? null;
   const wells = activeWorkspace?.wells ?? [];
+  const plateZoom = activeWorkspace?.zoom ?? 1;
 
   const groups = useMemo(() => [...new Set(wells.filter((well) => analyzableGroupRoles.includes(well.role)).map((well) => well.group).filter(Boolean))].sort(), [wells]);
   const inferredControlGroup = useMemo(() => {
@@ -209,6 +217,7 @@ export default function App() {
   const selectedRoleCounts = useMemo(() => Object.fromEntries(wellRoles.map((role) => [role, selectedWells.filter((well) => well.role === role).length])) as Record<WellRole, number>, [selectedWells]);
   const selectedSingleWell = selectedWells.length === 1 ? selectedWells[0] : null;
   const blankAnnotationMode = selectedWells.length > 0 && selectedWells.every((well) => well.role === "blank");
+  const advancedFilledCount = [batchDraft.treatment, batchDraft.concentration, batchDraft.timepoint, batchDraft.technicalReplicate, batchDraft.notes].filter(Boolean).length;
   const selectedTemplate = plateTemplateDefinitions.find((template) => template.id === layoutTemplateId)
     ?? plateTemplateDefinitions.find((template) => template.id === defaultLayoutTemplateId)
     ?? plateTemplateDefinitions[0];
@@ -262,10 +271,14 @@ export default function App() {
   const exportScope = selectedSummaryKeys.size ? `selected-${displayedBiologicalSummaries.length}rows` : "all";
 
   useEffect(() => {
-    if (!selectedWells.length) return;
-    if (selectedExclusionState === "excluded") setBatchDraft((current) => ({ ...current, excluded: "true" }));
-    if (selectedExclusionState === "included") setBatchDraft((current) => ({ ...current, excluded: "false" }));
-  }, [selectedExclusionState, selectedWells.length]);
+    if (draftStatus !== "dirty") return;
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectDraft);
+    return () => window.removeEventListener("beforeunload", protectDraft);
+  }, [draftStatus]);
 
   useEffect(() => {
     if (controlGroupTouched || config.controlGroup || !inferredControlGroup) return;
@@ -289,10 +302,44 @@ export default function App() {
     setConfig((current) => ({ ...current, controlGroup: "" }));
   }
 
+  function clearBatchDraft() {
+    setBatchDraft({ ...emptyBatchDraft });
+    setAutoNumberTechnical(true);
+    setDraftStatus("idle");
+  }
+
+  function confirmDiscardDraft(): boolean {
+    return draftStatus !== "dirty" || window.confirm("右侧还有尚未应用的注释。继续操作将丢弃这些填写，是否继续？");
+  }
+
+  function navigateTo(nextView: View) {
+    if (nextView === view) return;
+    if (view === "layout" && !confirmDiscardDraft()) return;
+    if (view === "layout") clearBatchDraft();
+    setView(nextView);
+  }
+
+  function selectAssayModule(moduleId: AssayModuleId, moduleName: string) {
+    if (view === "layout" && !confirmDiscardDraft()) return;
+    if (view === "layout") clearBatchDraft();
+    setSelectedModuleId(moduleId);
+    setModuleSelectionTouched(true);
+    setView("import");
+    setNotice(`已选择“${moduleName}”。请导入对应的仪器结果文件。`);
+    setError("");
+  }
+
+  function changeBatchDraft(patch: Partial<BatchDraft>) {
+    setBatchDraft((current) => ({ ...current, ...patch }));
+    setDraftStatus("dirty");
+  }
+
   function loadBatch(batch: PlateImportBatch) {
     const first = batch.plates[0];
     if (!first) return;
-    setPlateWorkspaces(batch.plates.map((item) => ({ plate: item, wells: item.wells })));
+    if (!confirmDiscardDraft()) return;
+    clearBatchDraft();
+    setPlateWorkspaces(batch.plates.map((item) => ({ plate: item, wells: item.wells, zoom: 1, zoomManuallyChanged: false })));
     setActivePlateIndex(0);
     setPendingBatch(null);
     resetPlateInteraction(first);
@@ -314,9 +361,22 @@ export default function App() {
       : workspace));
   }
 
+  function updatePlateSelection(next: Set<string>, anchor: string | null) {
+    setSelected(next);
+    setSelectionAnchor(anchor);
+  }
+
+  function setPlateZoom(zoom: number, manual: boolean) {
+    const nextZoom = Math.max(0.5, Math.min(1.3, Math.round(zoom * 10) / 10));
+    setPlateWorkspaces((current) => current.map((workspace, index) => index === activePlateIndex
+      ? { ...workspace, zoom: nextZoom, zoomManuallyChanged: manual || workspace.zoomManuallyChanged }
+      : workspace));
+  }
+
   function selectActivePlate(index: number) {
     const next = plateWorkspaces[index];
-    if (!next) return;
+    if (!next || index === activePlateIndex || !confirmDiscardDraft()) return;
+    clearBatchDraft();
     setActivePlateIndex(index);
     resetPlateInteraction(next.plate);
     setNotice(`已切换到 ${next.plate.metadata.plateName}；该板的注释和分析状态独立保存。`);
@@ -377,41 +437,6 @@ export default function App() {
     );
   }
 
-  function toggleWell(well: string, mode: SelectionMode) {
-    if (mode === "range") {
-      const anchor = selectionAnchor && wells.some((record) => record.well === selectionAnchor) ? selectionAnchor : well;
-      const rowOrder = [...new Set(wells.map((record) => record.row))];
-      const rowIndex = new Map(rowOrder.map((row, index) => [row, index]));
-      const anchorWell = wells.find((record) => record.well === anchor);
-      const targetWell = wells.find((record) => record.well === well);
-      if (!anchorWell || !targetWell) return;
-      const startRow = Math.min(rowIndex.get(anchorWell.row) ?? 0, rowIndex.get(targetWell.row) ?? 0);
-      const endRow = Math.max(rowIndex.get(anchorWell.row) ?? 0, rowIndex.get(targetWell.row) ?? 0);
-      const startColumn = Math.min(anchorWell.column, targetWell.column);
-      const endColumn = Math.max(anchorWell.column, targetWell.column);
-      setSelected(new Set(wells
-        .filter((record) => {
-          const currentRow = rowIndex.get(record.row) ?? -1;
-          return currentRow >= startRow && currentRow <= endRow && record.column >= startColumn && record.column <= endColumn;
-        })
-        .map((record) => record.well)));
-      if (!selectionAnchor) setSelectionAnchor(well);
-      return;
-    }
-    setSelected((current) => {
-      if (mode === "single") {
-        const shouldClear = current.size === 1 && current.has(well);
-        setSelectionAnchor(shouldClear ? null : well);
-        return shouldClear ? new Set() : new Set([well]);
-      }
-      const next = new Set(current);
-      if (next.has(well)) next.delete(well);
-      else next.add(well);
-      setSelectionAnchor(next.size ? well : null);
-      return next;
-    });
-  }
-
   function applyBatch() {
     if (!selected.size) return;
     const patch: LayoutPatch = {};
@@ -432,6 +457,7 @@ export default function App() {
     updateActiveWells((current) => current.map((well) => selected.has(well.well)
       ? { ...well, ...patch, technicalReplicate: autoNumberTechnical && !batchDraft.technicalReplicate ? technicalByWell.get(well.well) ?? well.technicalReplicate : (patch.technicalReplicate ?? well.technicalReplicate) }
       : well));
+    setDraftStatus("applied");
     setNotice(`已更新 ${selected.size} 个孔；原始读数未改变。`);
   }
 
@@ -439,7 +465,18 @@ export default function App() {
     if (!selected.size) return;
     updateActiveWells((current) => current.map((well) => selected.has(well.well) ? { ...well, excluded } : well));
     setBatchDraft((current) => ({ ...current, excluded: excluded ? "true" : "false" }));
+    setDraftStatus("applied");
     setNotice(excluded ? `已将 ${selected.size} 个孔标记为排除；原始读数未改变。` : `已将 ${selected.size} 个孔恢复为纳入分析；原始读数未改变。`);
+  }
+
+  function selectWellsByPreset(value: string) {
+    const matches = value === "unassigned" ? wells.filter((well) => well.role === "unassigned")
+      : value === "ungrouped" ? wells.filter((well) => well.role === "sample" && !well.group)
+        : value === "blank" ? wells.filter((well) => well.role === "blank")
+          : value === "excluded" ? wells.filter((well) => well.excluded)
+            : [];
+    const next = new Set(matches.map((well) => well.well));
+    updatePlateSelection(next, matches.at(-1)?.well ?? null);
   }
 
   function toggleSummarySelection(key: string) {
@@ -471,9 +508,9 @@ export default function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <button className="brand" type="button" onClick={() => setView("import")}>
+      <button className="brand" type="button" onClick={() => navigateTo("import")}>
         <span className="brand-mark"><i /><i /><i /><i /></span>
-        <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v0.2</small></span>
+        <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v0.3</small></span>
       </button>
       <div className="topbar-actions">
         <span className="privacy-pill"><i />Browser-local</span>
@@ -487,7 +524,7 @@ export default function App() {
           <h1>酶标数据入口，选择实验类型进行分析</h1>
         </div>
         <div className="assay-cards">
-          {assayModules.map((module) => <button key={module.id} type="button" disabled={module.status !== "ready"} aria-pressed={selectedModuleId === module.id} onClick={() => { setSelectedModuleId(module.id as AssayModuleId); setModuleSelectionTouched(true); setView("import"); setNotice(`已选择“${module.name}”。请导入对应的仪器结果文件。`); setError(""); }} className={`assay-card ${module.status === "ready" ? "ready" : "planned"} ${selectedModuleId === module.id ? "active" : ""}`}>
+          {assayModules.map((module) => <button key={module.id} type="button" disabled={module.status !== "ready"} aria-pressed={selectedModuleId === module.id} onClick={() => selectAssayModule(module.id as AssayModuleId, module.name)} className={`assay-card ${module.status === "ready" ? "ready" : "planned"} ${selectedModuleId === module.id ? "active" : ""}`}>
             <span>{module.shortName}</span>
             <strong>{module.name}</strong>
             <small>{module.measurementTarget}</small>
@@ -496,7 +533,7 @@ export default function App() {
       </section>
 
       {plate ? <nav className="workspace-nav" aria-label="工作区视图">
-        {(useGenericWorkflow ? (["import", "analysis"] as View[]) : (["import", "layout", "analysis"] as View[])).map((item, index) => <button type="button" key={item} className={view === item ? "active" : ""} onClick={() => setView(item)}><span>{index + 1}</span>{item === "import" ? "数据导入" : item === "layout" ? "板图与注释" : "分析与导出"}</button>)}
+        {(useGenericWorkflow ? (["import", "analysis"] as View[]) : (["import", "layout", "analysis"] as View[])).map((item, index) => <button type="button" key={item} className={view === item ? "active" : ""} onClick={() => navigateTo(item)}><span>{index + 1}</span>{item === "import" ? "数据导入" : item === "layout" ? "板图与注释" : "分析与导出"}</button>)}
       </nav> : null}
 
       {notice ? <div className="notice success" role="status">{notice}</div> : null}
@@ -561,7 +598,7 @@ export default function App() {
           </div>
         </div> : null}
         {plate?.warnings.length ? <ul className="compact-findings">{plate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
-        {plate ? <div className="next-step import-next-step"><div><strong>基本信息已解析</strong><p>{useGenericWorkflow ? `已识别 ${plate.assayData?.measurements.length ?? 0} 个测量/计算步骤；可直接核查曲线、公式和结果。` : "请复核实验方法和检测通道；下一步再补充样本、对照、空白与重复信息。"}</p></div><button type="button" className="primary-button" onClick={() => setView(useGenericWorkflow ? "analysis" : "layout")}>{useGenericWorkflow ? "进入分析与导出" : "进入板图与注释"}</button></div> : null}
+        {plate ? <div className="next-step import-next-step"><div><strong>基本信息已解析</strong><p>{useGenericWorkflow ? `已识别 ${plate.assayData?.measurements.length ?? 0} 个测量/计算步骤；可直接核查曲线、公式和结果。` : "请复核实验方法和检测通道；下一步再补充样本、对照、空白与重复信息。"}</p></div><button type="button" className="primary-button" onClick={() => navigateTo(useGenericWorkflow ? "analysis" : "layout")}>{useGenericWorkflow ? "进入分析与导出" : "进入板图与注释"}</button></div> : null}
       </section> : null}
 
       {view === "layout" && plate ? <section className="workspace">
@@ -578,76 +615,42 @@ export default function App() {
         </div>
         <div className="layout-grid">
           <div className="panel plate-panel">
-            <div className="panel-head"><div><h3>{plate.rows * plate.columns}孔板 · {plate.wells.length}个已测孔</h3><p>普通点击单选；Shift 点头尾选择矩形区域；Ctrl / Command 逐个增减。</p></div><span>{selected.size} selected</span></div>
-            <PlateMap wells={wells} selected={selected} onToggle={toggleWell} plateRows={plate.rows} plateColumns={plate.columns} signalLabel={rawSignalLabel(plate)} />
+            <div className="panel-head plate-panel-head">
+              <div><h3>{plate.rows * plate.columns}孔板 · {plate.wells.length}个已测孔</h3><p>拖动框选；Ctrl / Command 追加框选或逐孔增减；Shift 点选头尾矩形区域。</p></div>
+              <div className="plate-head-actions"><span>{selected.size} 个已选</span><div className="zoom-controls" aria-label="孔板缩放"><button type="button" disabled={plateZoom <= 0.5} onClick={() => setPlateZoom(plateZoom - 0.1, true)} aria-label="缩小孔板">−</button><button type="button" onClick={() => setPlateZoom(1, true)} aria-label="重置为百分之百">{Math.round(plateZoom * 100)}%</button><button type="button" disabled={plateZoom >= 1.3} onClick={() => setPlateZoom(plateZoom + 0.1, true)} aria-label="放大孔板">＋</button></div></div>
+            </div>
+            <PlateMap wells={wells} selected={selected} selectionAnchor={selectionAnchor} onSelectionChange={updatePlateSelection} plateRows={plate.rows} plateColumns={plate.columns} signalLabel={rawSignalLabel(plate)} zoom={plateZoom} autoFitEnabled={!activeWorkspace.zoomManuallyChanged} onAutoFit={(nextZoom) => setPlateZoom(nextZoom, false)} />
             <div className="plate-legend"><span className="unassigned">未指定 {roleCounts.unassigned}</span><span className="sample">样本 {roleCounts.sample}</span><span className="control">对照 {roleCounts.control}</span><span className="standard">标准品 {roleCounts.standard}</span><span className="qc">质控 {roleCounts.qc}</span><span className="blank">空白 {roleCounts.blank}</span><span>颜色深浅表示原始读数，不表示分组。</span></div>
           </div>
           <aside className="panel annotation-panel">
-            <div className="panel-head"><div><h3>批量注释</h3><p>{selected.size ? `将更新 ${selected.size} 个孔；留空字段保持原值。` : "先在板图中选择一个或多个孔。"}</p></div></div>
-            <div className="well-detail">
-              {selectedSingleWell ? <>
-                <div className="well-detail-title"><strong>{selectedSingleWell.well}</strong><span>{selectedSingleWell.excluded ? "排除分析" : "纳入分析"}</span></div>
-                {selectedSingleWell.role === "blank" ? <dl>
-                  <div><dt>角色</dt><dd>空白孔</dd></div>
-                  <div><dt>{rawSignalLabel(plate)}</dt><dd>{formatRawSignal(plate, selectedSingleWell.rawValue)}</dd></div>
-                  <div><dt>用途</dt><dd>背景扣除</dd></div>
-                  <div><dt>Blank mean</dt><dd>{analysis.blankMean === null ? "未计算" : analysis.blankMean.toFixed(4)}</dd></div>
-                  <div><dt>纳入背景</dt><dd>{selectedSingleWell.excluded ? "否" : "是"}</dd></div>
-                  <div><dt>仪器标签</dt><dd>{selectedSingleWell.instrumentLabel || "无"}</dd></div>
-                  {selectedSingleWell.notes ? <div className="wide"><dt>备注</dt><dd>{selectedSingleWell.notes}</dd></div> : null}
-                </dl> : <dl>
-                  <div><dt>角色</dt><dd>{roleLabel(selectedSingleWell.role)}</dd></div>
-                  <div><dt>{rawSignalLabel(plate)}</dt><dd>{formatRawSignal(plate, selectedSingleWell.rawValue)}</dd></div>
-                  <div><dt>分组</dt><dd>{selectedSingleWell.group || "未填写"}</dd></div>
-                  <div><dt>样本ID</dt><dd>{selectedSingleWell.sampleId || "未填写"}</dd></div>
-                  <div><dt>处理</dt><dd>{selectedSingleWell.treatment || "未填写"}</dd></div>
-                  <div><dt>浓度</dt><dd>{selectedSingleWell.concentration || "未填写"}</dd></div>
-                  <div><dt>时间点</dt><dd>{selectedSingleWell.timepoint || "未填写"}</dd></div>
-                  <div><dt>生物学重复</dt><dd>{selectedSingleWell.biologicalReplicate || "未填写"}</dd></div>
-                  <div><dt>技术重复</dt><dd>{selectedSingleWell.technicalReplicate || "未填写"}</dd></div>
-                  <div><dt>仪器标签</dt><dd>{selectedSingleWell.instrumentLabel || "无"}</dd></div>
-                  {selectedSingleWell.notes ? <div className="wide"><dt>备注</dt><dd>{selectedSingleWell.notes}</dd></div> : null}
-                </dl>}
-              </> : selectedWells.length ? <>
-                <div className="well-detail-title"><strong>{selectedWells.length} 个孔</strong><span>{selectedExcludedCount ? `${selectedExcludedCount} 个已排除` : "全部纳入"}</span></div>
-                <dl>
-                  <div><dt>未指定</dt><dd>{selectedRoleCounts.unassigned}</dd></div>
-                  <div><dt>样本</dt><dd>{selectedRoleCounts.sample}</dd></div>
-                  <div><dt>对照</dt><dd>{selectedRoleCounts.control}</dd></div>
-                  <div><dt>质控</dt><dd>{selectedRoleCounts.qc}</dd></div>
-                  <div><dt>标准品</dt><dd>{selectedRoleCounts.standard}</dd></div>
-                  <div><dt>空白</dt><dd>{selectedRoleCounts.blank}</dd></div>
-                </dl>
-              </> : <p>点击孔位后，这里会显示当前孔的注释和读数。</p>}
+            <div className="panel-head annotation-panel-head"><div><h3>批量注释</h3><p>{selected.size ? `填写内容将应用到 ${selected.size} 个孔；留空字段保持原值。` : "先在板图中选择一个或多个孔。"}</p></div>{draftStatus !== "idle" ? <span className={`draft-badge ${draftStatus}`}>{draftStatus === "dirty" ? "尚未应用" : "已应用"}</span> : null}</div>
+            <div className="annotation-panel-body">
+              <div className="well-detail">
+                {selectedSingleWell ? <>
+                  <div className="well-detail-title"><strong>{selectedSingleWell.well}</strong><span>{selectedSingleWell.excluded ? "排除分析" : "纳入分析"}</span></div>
+                  <dl>
+                    <div><dt>角色</dt><dd>{roleLabel(selectedSingleWell.role)}</dd></div><div><dt>{rawSignalLabel(plate)}</dt><dd>{formatRawSignal(plate, selectedSingleWell.rawValue)}</dd></div>
+                    {selectedSingleWell.role === "blank" ? <><div><dt>用途</dt><dd>背景扣除</dd></div><div><dt>Blank mean</dt><dd>{analysis.blankMean === null ? "未计算" : analysis.blankMean.toFixed(4)}</dd></div></> : null}
+                    {selectedSingleWell.group ? <div><dt>分组</dt><dd>{selectedSingleWell.group}</dd></div> : null}{selectedSingleWell.sampleId ? <div><dt>样本ID</dt><dd>{selectedSingleWell.sampleId}</dd></div> : null}{selectedSingleWell.biologicalReplicate ? <div><dt>生物学重复</dt><dd>{selectedSingleWell.biologicalReplicate}</dd></div> : null}{selectedSingleWell.treatment ? <div><dt>处理</dt><dd>{selectedSingleWell.treatment}</dd></div> : null}{selectedSingleWell.concentration ? <div><dt>浓度</dt><dd>{selectedSingleWell.concentration}</dd></div> : null}{selectedSingleWell.timepoint ? <div><dt>时间点</dt><dd>{selectedSingleWell.timepoint}</dd></div> : null}{selectedSingleWell.technicalReplicate ? <div><dt>技术重复</dt><dd>{selectedSingleWell.technicalReplicate}</dd></div> : null}{selectedSingleWell.instrumentLabel ? <div><dt>仪器标签</dt><dd>{selectedSingleWell.instrumentLabel}</dd></div> : null}{selectedSingleWell.notes ? <div className="wide"><dt>备注</dt><dd>{selectedSingleWell.notes}</dd></div> : null}
+                  </dl>
+                </> : selectedWells.length ? <>
+                  <div className="well-detail-title"><strong>{selectedWells.length} 个孔</strong><span>{selectedExcludedCount ? `${selectedExcludedCount} 个已排除` : "全部纳入"}</span></div>
+                  <p className="selected-well-summary">{selectedWells.slice(0, 6).map((well) => well.well).join("、")}{selectedWells.length > 6 ? "…" : ""}</p>
+                  <div className="role-summary">{wellRoles.filter((role) => selectedRoleCounts[role]).map((role) => <span key={role}>{roleLabel(role)} {selectedRoleCounts[role]}</span>)}</div>
+                </> : <p>点击或框选孔位后，这里会显示读数和已有注释。</p>}
+              </div>
+              <div className="quick-selects"><select aria-label="快速选择孔" defaultValue="" onChange={(event) => { if (event.target.value) selectWellsByPreset(event.target.value); event.target.value = ""; }}><option value="" disabled>快速选择…</option><option value="unassigned">所有未指定孔</option><option value="ungrouped">所有未分组样本</option><option value="blank">所有空白孔</option><option value="excluded">所有已排除孔</option></select>{selectedExcludedCount ? <button type="button" onClick={() => setSelectedExclusion(false)}>恢复纳入</button> : null}<button type="button" disabled={!selected.size} onClick={() => updatePlateSelection(new Set(), null)}>清除选择</button></div>
+              <div className="form-grid annotation-core-form">
+                <Field label="孔角色"><select value={batchDraft.role} onChange={(event) => changeBatchDraft({ role: event.target.value as BatchDraft["role"] })}><option value="">保持原值</option><option value="unassigned">未指定</option><option value="sample">样本</option><option value="control">对照</option><option value="standard">标准品</option><option value="qc">质控</option><option value="blank">空白</option></select></Field>
+                {!blankAnnotationMode ? <><Field label="分组 · Group *"><input value={batchDraft.group} onChange={(event) => changeBatchDraft({ group: event.target.value })} placeholder="NC / siGENE" /></Field><Field label="样本ID"><input value={batchDraft.sampleId} onChange={(event) => changeBatchDraft({ sampleId: event.target.value })} placeholder="A549_NC_B1" /></Field><Field label="生物学重复 *"><input value={batchDraft.biologicalReplicate} onChange={(event) => changeBatchDraft({ biologicalReplicate: event.target.value })} placeholder="Bio1" /><small className="field-help">填写独立实验或独立铺板编号；同一编号内的多个孔是技术复孔。</small></Field></> : null}
+                <Field label="排除状态"><select value={batchDraft.excluded} onChange={(event) => changeBatchDraft({ excluded: event.target.value as BatchDraft["excluded"] })}><option value="false">纳入分析</option><option value="true">排除分析</option></select>{selectedExclusionState === "mixed" ? <small className="field-help">所选孔状态不一致；应用后会统一为当前选择。</small> : null}</Field>
+              </div>
+              {!blankAnnotationMode ? <details className="advanced-fields" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>更多实验信息{advancedFilledCount ? <span>{advancedFilledCount} 项已填写</span> : null}</summary><div className="form-grid"><Field label="处理"><input value={batchDraft.treatment} onChange={(event) => changeBatchDraft({ treatment: event.target.value })} placeholder="siRNA / Drug" /></Field><Field label="浓度"><input value={batchDraft.concentration} onChange={(event) => changeBatchDraft({ concentration: event.target.value })} placeholder="10 nM" /></Field><Field label="时间点"><input value={batchDraft.timepoint} onChange={(event) => changeBatchDraft({ timepoint: event.target.value })} placeholder="Day0 / 24 h" /></Field><Field label="技术重复"><input value={batchDraft.technicalReplicate} onChange={(event) => changeBatchDraft({ technicalReplicate: event.target.value })} placeholder="通常留空" /><small className="field-help">通常由下方选项按当前顺序自动编号。</small></Field><Field label="备注"><input value={batchDraft.notes} onChange={(event) => changeBatchDraft({ notes: event.target.value })} /></Field></div><label className="check-row"><input type="checkbox" checked={autoNumberTechnical} onChange={(event) => { setAutoNumberTechnical(event.target.checked); setDraftStatus("dirty"); }} />按当前选择顺序自动编号技术重复 T1…Tn</label></details> : <p className="blank-form-note">空白孔只参与背景扣除；通常只需确认角色与纳入/排除状态。</p>}
             </div>
-            <div className="quick-selects">
-              <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "unassigned").map((well) => well.well)))}>选择未指定孔</button>
-              <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "sample" && !well.group).map((well) => well.well)))}>选择未分组样本</button>
-              <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.role === "blank").map((well) => well.well)))}>选择空白孔</button>
-              <button type="button" onClick={() => setSelected(new Set(wells.filter((well) => well.excluded).map((well) => well.well)))}>选择已排除孔</button>
-              <button type="button" disabled={!selectedExcludedCount} onClick={() => setSelectedExclusion(false)}>取消所选排除</button>
-              <button type="button" onClick={() => { setSelected(new Set()); setSelectionAnchor(null); }}>清除选择</button>
-            </div>
-            <div className={blankAnnotationMode ? "form-grid blank-form-grid" : "form-grid"}>
-              <Field label="孔角色"><select value={batchDraft.role} onChange={(event) => setBatchDraft({ ...batchDraft, role: event.target.value as BatchDraft["role"] })}><option value="">保持原值</option><option value="unassigned">未指定</option><option value="sample">样本</option><option value="control">对照</option><option value="standard">标准品</option><option value="qc">质控</option><option value="blank">空白</option></select></Field>
-              {!blankAnnotationMode ? <>
-                <Field label="分组 · Group *"><input value={batchDraft.group} onChange={(event) => setBatchDraft({ ...batchDraft, group: event.target.value })} placeholder="NC / siGENE" /></Field>
-                <Field label="样本ID"><input value={batchDraft.sampleId} onChange={(event) => setBatchDraft({ ...batchDraft, sampleId: event.target.value })} placeholder="A549_NC_B1" /></Field>
-                <Field label="处理"><input value={batchDraft.treatment} onChange={(event) => setBatchDraft({ ...batchDraft, treatment: event.target.value })} placeholder="siRNA / Drug" /></Field>
-                <Field label="浓度"><input value={batchDraft.concentration} onChange={(event) => setBatchDraft({ ...batchDraft, concentration: event.target.value })} placeholder="10 nM" /></Field>
-                <Field label="时间点"><input value={batchDraft.timepoint} onChange={(event) => setBatchDraft({ ...batchDraft, timepoint: event.target.value })} placeholder="Day0 / 24 h" /></Field>
-                <Field label="生物学重复 *"><input value={batchDraft.biologicalReplicate} onChange={(event) => setBatchDraft({ ...batchDraft, biologicalReplicate: event.target.value })} placeholder="Bio1" /><small className="field-help">填独立实验/独立铺板编号，如 Bio1、Bio2；同一生物学重复内的多个孔属于技术复孔。</small></Field>
-                <Field label="技术重复"><input value={batchDraft.technicalReplicate} onChange={(event) => setBatchDraft({ ...batchDraft, technicalReplicate: event.target.value })} placeholder="通常留空" /><small className="field-help">通常留空；勾选自动编号后，所选孔会按顺序填为 T1、T2、T3...</small></Field>
-              </> : null}
-              <Field label="排除状态"><select value={batchDraft.excluded} onChange={(event) => setBatchDraft({ ...batchDraft, excluded: event.target.value as BatchDraft["excluded"] })}><option value="false">纳入分析</option><option value="true">排除分析</option></select>{selectedExclusionState === "mixed" ? <small className="field-help">所选孔状态不一致；应用后会统一为当前选择。</small> : null}</Field>
-              <Field label="备注"><input value={batchDraft.notes} onChange={(event) => setBatchDraft({ ...batchDraft, notes: event.target.value })} /></Field>
-            </div>
-            {blankAnnotationMode ? <p className="blank-form-note">空白孔只参与背景扣除；通常只需要确认孔角色、纳入/排除状态和备注。</p> : <label className="check-row"><input type="checkbox" checked={autoNumberTechnical} onChange={(event) => setAutoNumberTechnical(event.target.checked)} />按当前选择顺序自动编号技术重复 T1…Tn</label>}
-            <button type="button" className="primary-button full" disabled={!selected.size} onClick={applyBatch}>应用到所选孔</button>
-            {selectedWells.length ? <div className="selected-preview"><strong>所选孔{selectedExcludedCount ? ` · ${selectedExcludedCount} 个已排除` : ""}</strong><p>{selectedWells.map((well) => well.well).join(", ")}</p></div> : null}
+            <div className="annotation-panel-footer"><button type="button" className="secondary-button" disabled={draftStatus === "idle"} onClick={clearBatchDraft}>清空填写</button><button type="button" className="primary-button" disabled={!selected.size} onClick={applyBatch}>应用到所选 {selected.size} 个孔</button></div>
           </aside>
         </div>
-        <div className="next-step"><div><strong>{analysis.findings.some((finding) => finding.code === "LAYOUT_INCOMPLETE" || finding.code === "ROLE_UNASSIGNED") ? "板图尚未完成" : "板图具备基础分析条件"}</strong><p>只有孔角色、分组和生物学重复齐全后，结果才会进入正式汇总。</p></div><button type="button" className="primary-button" onClick={() => setView("analysis")}>进入分析</button></div>
+        <div className="next-step"><div><strong>{analysis.findings.some((finding) => finding.code === "LAYOUT_INCOMPLETE" || finding.code === "ROLE_UNASSIGNED") ? "板图尚未完成" : "板图具备基础分析条件"}</strong><p>只有孔角色、分组和生物学重复齐全后，结果才会进入正式汇总。</p></div><button type="button" className="primary-button" onClick={() => navigateTo("analysis")}>进入分析</button></div>
       </section> : null}
 
       {view === "analysis" && plate && useGenericWorkflow && plate.assayData ? <section className="workspace analysis-workspace">
