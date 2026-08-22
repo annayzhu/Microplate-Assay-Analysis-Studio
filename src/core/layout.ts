@@ -82,6 +82,7 @@ function normalizeWell(value: string): string {
 
 function normalizeRole(value: string): WellRole | undefined {
   const normalized = value.trim().toLocaleLowerCase();
+  if (["unassigned", "未指定", "未分配"].includes(normalized)) return "unassigned";
   if (["blank", "空白"].includes(normalized)) return "blank";
   if (["qc", "质控", "質控"].includes(normalized)) return "qc";
   if (["control", "对照", "對照"].includes(normalized)) return "control";

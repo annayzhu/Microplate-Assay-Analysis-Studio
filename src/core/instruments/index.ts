@@ -1,5 +1,10 @@
 import XLSX from "xlsx-js-style";
-import type { ParsedPlate } from "../types";
+import type { ParsedPlate, PlateImportBatch } from "../types";
+import {
+  parsePastedPlateReadings,
+  parseReadingTemplateWorkbook,
+  type ManualReadingMetadata,
+} from "./manual-readings";
 import { parseVarioskanLuxWorkbook } from "./varioskan-lux";
 import { parseVictorLegacyWorkbook } from "./victor-legacy";
 import { parseSkanitXml } from "./skanit-xml";
@@ -37,4 +42,24 @@ export async function parseMicroplateFile(file: File): Promise<ParsedPlate> {
   }
   if (/\.xlsx?$/i.test(file.name)) return parseMicroplateWorkbook(bytes, file.name);
   throw new Error("当前支持 SkanIt SKAX / XML / XLSX，以及旧版 XLS 仪器导出文件。");
+}
+
+export type PlateReadingImportRequest =
+  | { kind: "instrument-file"; file: File }
+  | { kind: "manual-paste"; text: string; metadata: ManualReadingMetadata }
+  | { kind: "reading-template"; file: File; metadata: ManualReadingMetadata };
+
+export async function importPlateReadings(request: PlateReadingImportRequest): Promise<PlateImportBatch> {
+  if (request.kind === "manual-paste") return parsePastedPlateReadings(request.text, request.metadata);
+  if (request.kind === "reading-template") {
+    return parseReadingTemplateWorkbook(await request.file.arrayBuffer(), request.file.name, request.metadata);
+  }
+  const plate = await parseMicroplateFile(request.file);
+  return {
+    id: `instrument-file-${Date.now()}`,
+    sourceKind: "instrument-file",
+    sourceName: request.file.name,
+    plates: [plate],
+    warnings: plate.warnings,
+  };
 }

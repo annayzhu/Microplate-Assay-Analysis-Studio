@@ -46,6 +46,16 @@ export function analyzeCellViability(wells: WellRecord[], config: AnalysisConfig
   const blankSd = blankValues.length > 1 ? sampleSd(blankValues) : null;
   const blankCv = blankValues.length > 1 ? cvPercent(blankValues) : null;
   const findings: QcFinding[] = [];
+  const unassignedWells = included.filter((well) => well.role === "unassigned");
+
+  if (unassignedWells.length) {
+    findings.push({
+      code: "ROLE_UNASSIGNED",
+      severity: "error",
+      message: `${unassignedWells.length} 个孔尚未指定样本、对照、空白或其他角色。`,
+      wells: unassignedWells.map((well) => well.well),
+    });
+  }
 
   if (blankMean === null) {
     findings.push({ code: "BLANK_MISSING", severity: "error", message: "没有标记空白孔，无法进行背景扣除。", wells: [] });

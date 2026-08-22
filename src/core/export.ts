@@ -10,8 +10,8 @@ export function rowsToCsv(headers: string[], rows: Array<Record<string, unknown>
   return [headers.join(","), ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(","))].join("\n");
 }
 
-export function annotatedWellsCsv(result: CellViabilityAnalysisResult): string {
-  const headers = ["well", "row", "column", "instrument_label", "role", "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "technical_replicate", "raw_signal", "blank_corrected_signal", "excluded", "notes"];
+export function annotatedWellsCsv(result: CellViabilityAnalysisResult, plate?: ParsedPlate): string {
+  const headers = ["well", "row", "column", "instrument_label", "role", "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "technical_replicate", "raw_signal", "blank_corrected_signal", "excluded", "notes", "plate_name", "import_source"];
   return rowsToCsv(headers, result.annotatedWells.map((well) => ({
     well: well.well,
     row: well.row,
@@ -29,11 +29,13 @@ export function annotatedWellsCsv(result: CellViabilityAnalysisResult): string {
     blank_corrected_signal: well.blankCorrectedValue,
     excluded: well.excluded,
     notes: well.notes,
+    plate_name: plate?.metadata.plateName ?? "",
+    import_source: plate?.metadata.sourceKind ?? "",
   })));
 }
 
-export function technicalSummaryCsv(result: CellViabilityAnalysisResult): string {
-  const headers = ["sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "wells", "n_technical", "raw_mean", "raw_sd", "raw_cv_percent", "corrected_mean", "corrected_sd", "corrected_cv_percent"];
+export function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate?: ParsedPlate): string {
+  const headers = ["sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "wells", "n_technical", "raw_mean", "raw_sd", "raw_cv_percent", "corrected_mean", "corrected_sd", "corrected_cv_percent", "plate_name", "import_source"];
   return rowsToCsv(headers, result.technicalSummaries.map((row) => ({
     sample_id: row.sampleId,
     group: row.group,
@@ -49,12 +51,14 @@ export function technicalSummaryCsv(result: CellViabilityAnalysisResult): string
     corrected_mean: row.correctedMean,
     corrected_sd: row.correctedSd,
     corrected_cv_percent: row.correctedCvPercent,
+    plate_name: plate?.metadata.plateName ?? "",
+    import_source: plate?.metadata.sourceKind ?? "",
   })));
 }
 
-export function biologicalSummaryCsv(result: CellViabilityAnalysisResult): string {
+export function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate?: ParsedPlate): string {
   const comparisonByGroup = new Map(result.significanceComparisons.map((comparison) => [[comparison.group, comparison.treatment, comparison.concentration, comparison.timepoint].join("¦"), comparison]));
-  const headers = ["category", "value", "sd", "sem", "group", "treatment", "concentration", "timepoint", "n_biological", "blank_corrected_mean", "p_value_vs_control", "fdr_vs_control", "significance"];
+  const headers = ["category", "value", "sd", "sem", "group", "treatment", "concentration", "timepoint", "n_biological", "blank_corrected_mean", "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source"];
   return rowsToCsv(headers, result.biologicalSummaries.map((row) => {
     const comparison = comparisonByGroup.get([row.group, row.treatment, row.concentration, row.timepoint].join("¦"));
     return {
@@ -71,6 +75,8 @@ export function biologicalSummaryCsv(result: CellViabilityAnalysisResult): strin
       p_value_vs_control: comparison?.pValue ?? "",
       fdr_vs_control: comparison?.adjustedPValue ?? "",
       significance: comparison?.label ?? "",
+      plate_name: plate?.metadata.plateName ?? "",
+      import_source: plate?.metadata.sourceKind ?? "",
     };
   }));
 }
@@ -78,7 +84,7 @@ export function biologicalSummaryCsv(result: CellViabilityAnalysisResult): strin
 export function analysisPackageJson(plate: ParsedPlate, wells: WellRecord[], config: AnalysisConfig, result: CellViabilityAnalysisResult): string {
   return JSON.stringify({
     schemaVersion: 1,
-    tool: { id: "microplate-assay-studio", version: "0.1.0" },
+    tool: { id: "microplate-assay-studio", version: "0.2.0" },
     assay: { id: "cell-viability", label: plate.metadata.assayMethodLabel },
     generatedAt: new Date().toISOString(),
     source: plate.metadata,
@@ -128,7 +134,11 @@ export function assayMeasurementsCsv(plate: ParsedPlate): string {
 }
 
 export function downloadText(filename: string, content: string, mimeType: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type: `${mimeType};charset=utf-8` }));
+  downloadBlob(filename, new Blob([content], { type: `${mimeType};charset=utf-8` }));
+}
+
+export function downloadBlob(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
