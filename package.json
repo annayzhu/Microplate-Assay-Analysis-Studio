@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:offline": "npm run build && node scripts/build-offline.mjs",
+    "build:sites": "npm run build:offline && node scripts/build-sites.mjs",
     "typecheck": "tsc -b --pretty false",
     "test:unit": "vitest run",
     "test:real": "node --import tsx scripts/validate-real-file.ts",
