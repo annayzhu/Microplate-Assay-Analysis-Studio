@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createReproducibleProject, parseReproducibleProject, projectSchemaVersion } from "../src/core/project-file";
+import { createArtifact, parseProjectArtifact, projectSchemaVersion, toolIdentity } from "../src/core/artifacts";
 import { parsePastedPlateReadings } from "../src/core/instruments/manual-readings";
 
 const matrix = "读数\t1\t2\t3\nA\t0\t0.2\t0.3\nB\t0.4\t0.5\t0.6";
 const config = { controlGroup: "Control", technicalCvThresholdPercent: 15, blankCvThresholdPercent: 10 };
 
-describe("reproducible project file", () => {
+describe("versioned reproducible artifact module", () => {
   it("round-trips raw values, annotations, assay assignment, experiment record, and parameters", () => {
     const plate = parsePastedPlateReadings(matrix, {
       assayModuleId: "cell-viability",
@@ -23,10 +23,11 @@ describe("reproducible project file", () => {
       notes: "confirmed",
     } : well);
     const experiment = { name: "Round trip", operator: "Researcher", date: "2026-08-22", notes: "local only" };
-    const text = createReproducibleProject([{ plate, wells }], experiment, "cell-viability", config);
-    const restored = parseReproducibleProject(text, "round-trip.json");
+    const artifact = createArtifact({ kind: "project", plates: [{ ...plate, wells }], experiment, activeModuleId: "cell-viability", analysisConfig: config });
+    const restored = parseProjectArtifact(artifact.content, "round-trip.json");
 
-    expect(JSON.parse(text).schemaVersion).toBe(projectSchemaVersion);
+    expect(artifact.filename).toContain("reproducible-project.json");
+    expect(JSON.parse(artifact.content)).toMatchObject({ schemaVersion: projectSchemaVersion, tool: toolIdentity });
     expect(restored.sourceKind).toBe("project-file");
     expect(restored.experiment).toEqual(experiment);
     expect(restored.restoredAnalysisConfig).toEqual(config);
@@ -36,7 +37,7 @@ describe("reproducible project file", () => {
   });
 
   it("rejects unrelated or unsupported JSON instead of guessing", () => {
-    expect(() => parseReproducibleProject("{}", "empty.json")).toThrow(/版本不受支持/);
-    expect(() => parseReproducibleProject("not json", "broken.json")).toThrow(/不是有效的 JSON/);
+    expect(() => parseProjectArtifact("{}", "empty.json")).toThrow(/版本不受支持/);
+    expect(() => parseProjectArtifact("not json", "broken.json")).toThrow(/不是有效的 JSON/);
   });
 });

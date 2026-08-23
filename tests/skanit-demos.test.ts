@@ -6,6 +6,14 @@ import { parseVarioskanLuxWorkbook } from "../src/core/instruments/varioskan-lux
 const demoDirectory = new URL("../酶标仪demo/", import.meta.url);
 const describeWithDemos = fs.existsSync(demoDirectory) ? describe : describe.skip;
 
+describe("optional local vendor-demo contract", () => {
+  it("reports whether the non-redistributable demo matrix is available", () => {
+    const available = fs.existsSync(demoDirectory);
+    if (!available) console.warn("Vendor demo matrix not validated: run npm run test:real with authorized local files.");
+    expect(typeof available).toBe("boolean");
+  });
+});
+
 function bytes(name: string): ArrayBuffer {
   const buffer = fs.readFileSync(new URL(name, demoDirectory));
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;

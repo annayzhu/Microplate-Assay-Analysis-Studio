@@ -5,8 +5,8 @@ import {
   detectedAssayModule,
   getAssayWorkflow,
 } from "../src/core/assay-workflows";
+import { createArtifact } from "../src/core/artifacts";
 import { parsePastedPlateReadings } from "../src/core/instruments/manual-readings";
-import { assayMeasurementsCsv } from "../src/core/export";
 
 const simpleMatrix = "吸光值\t1\t2\t3\nA\t0.1\t0.2\t0.3\nB\t0.1\t0.2\t0.3";
 
@@ -58,7 +58,7 @@ describe("assay workflow boundary", () => {
       biologicalReplicate: "Bio1",
       technicalReplicate: "T1",
     } : well);
-    const csv = assayMeasurementsCsv(plate, wells);
+    const csv = createArtifact({ kind: "measurements", plate, wells }).content;
     expect(csv.split("\n")[0]).toContain("confirmed_assay_module");
     expect(csv.split("\n")[0]).toContain("biological_replicate");
     expect(csv).toContain("protein-quant");

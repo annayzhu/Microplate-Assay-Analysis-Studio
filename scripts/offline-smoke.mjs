@@ -1,21 +1,12 @@
-import { chromium } from "/Users/annayzhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { assertSignals, dragBetweenWells, openAcceptanceBrowser } from "./acceptance-harness.mjs";
 
 const offlineHtml = process.argv[2];
 const screenshotPath = process.argv[3];
 if (!offlineHtml) throw new Error("Usage: node scripts/offline-smoke.mjs <offline-html> [screenshot-path]");
 
-const browser = await chromium.launch({
-  headless: true,
-  executablePath: "/Users/annayzhu/Library/Caches/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-mac-arm64/chrome-headless-shell",
-});
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-const consoleErrors = [];
-page.on("console", (message) => {
-  if (message.type() === "error") consoleErrors.push(message.text());
-});
-page.on("pageerror", (error) => consoleErrors.push(error.message));
+const { browser, page, consoleErrors } = await openAcceptanceBrowser({ viewport: { width: 1440, height: 1000 } });
 
 try {
   await page.goto(pathToFileURL(resolve(offlineHtml)).href, { waitUntil: "load" });
@@ -30,17 +21,9 @@ try {
   await page.getByRole("heading", { name: "导入预览" }).waitFor();
   await page.getByRole("button", { name: "确认载入 1 块板" }).click();
   const visibleText = await page.locator("body").innerText();
-  for (const signal of ["离线验证板", "96 个已测孔", "用户已填写", "人工录入"]) {
-    if (!visibleText.includes(signal)) throw new Error(`Fresh offline package is missing expected signal: ${signal}`);
-  }
+  assertSignals(visibleText, ["离线验证板", "96 个已测孔", "用户已填写", "人工录入"], "Fresh offline package");
   await page.getByRole("button", { name: "进入板图与注释" }).click();
-  const start = await page.locator('[data-well="A1"]').boundingBox();
-  const end = await page.locator('[data-well="B2"]').boundingBox();
-  if (!start || !end) throw new Error("Offline plate map did not render selection targets.");
-  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, { steps: 6 });
-  await page.mouse.up();
+  await dragBetweenWells(page, "A1", "B2");
   await page.getByText("4 个已选", { exact: true }).waitFor();
   await page.getByRole("button", { name: "缩小孔板" }).click();
   if (await page.locator(".plate-scroll").getAttribute("data-zoom") !== "90") throw new Error("Offline zoom control did not step to 90%.");
