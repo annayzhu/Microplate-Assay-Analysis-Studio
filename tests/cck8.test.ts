@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCck8 } from "../src/core/assays/cck8";
-import { biologicalSummaryCsv } from "../src/core/export";
+import { createArtifact } from "../src/core/artifacts";
 import type { WellRecord, WellRole } from "../src/core/types";
+import { fixturePlate } from "./fixtures/plate-fixtures";
 
 function makeWell(
   well: string,
@@ -85,7 +86,7 @@ describe("CCK-8 analysis", () => {
     expect(result.significanceComparisons[0].note).toContain("Paired t-test");
     expect(result.findings.filter((finding) => finding.severity === "error")).toEqual([]);
 
-    const summaryCsv = biologicalSummaryCsv(result);
+    const summaryCsv = createArtifact({ kind: "biological-summary", plate: fixturePlate(), result, scope: "all" }).content;
     expect(summaryCsv.split("\n")[0].split(",")).toContain("sd");
     const drugCsvRow = summaryCsv.split("\n").find((line) => line.includes("Drug"))?.split(",");
     expect(Number(drugCsvRow?.[2])).toBeCloseTo(5, 12);

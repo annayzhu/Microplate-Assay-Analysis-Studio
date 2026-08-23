@@ -49,7 +49,7 @@ function rectangularSelection(wells: WellRecord[], anchor: string, target: strin
   }).map((record) => record.well));
 }
 
-function lastSelectedWell(wells: WellRecord[], selected: Set<string>): string | null {
+function lastSelectedWell(wells: WellRecord[], selected: ReadonlySet<string>): string | null {
   for (let index = wells.length - 1; index >= 0; index -= 1) {
     if (selected.has(wells[index].well)) return wells[index].well;
   }
@@ -69,7 +69,7 @@ export function PlateMap({
   onAutoFit,
 }: {
   wells: WellRecord[];
-  selected: Set<string>;
+  selected: ReadonlySet<string>;
   selectionAnchor: string | null;
   onSelectionChange: (next: Set<string>, anchor: string | null) => void;
   plateRows?: number;
@@ -189,7 +189,7 @@ export function PlateMap({
     };
   }
 
-  function selectOneWell(well: string, baseSelection: Set<string>, additive: boolean, shiftKey: boolean) {
+  function selectOneWell(well: string, baseSelection: ReadonlySet<string>, additive: boolean, shiftKey: boolean) {
     if (shiftKey) {
       const anchor = selectionAnchor && wells.some((record) => record.well === selectionAnchor) ? selectionAnchor : well;
       onSelectionChange(rectangularSelection(wells, anchor, well), selectionAnchor ?? well);

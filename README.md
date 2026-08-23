@@ -1,6 +1,6 @@
 # Microplate Assay Studio
 
-面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.4，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
+面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.4.1，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
 
 ## 工具定位
 
@@ -42,6 +42,12 @@ npm run dev
 
 默认地址：`http://127.0.0.1:4178`
 
+首次运行浏览器验收测试前安装 Chromium：
+
+```bash
+npx playwright install chromium
+```
+
 ### 生成离线单文件
 
 ```bash
@@ -67,6 +73,21 @@ npm test
 - 模块能力状态、识别/确认决策、带来源信息的 CSV 导出和可复现项目文件往返恢复。
 - TypeScript 类型检查和生产构建。
 
+启动本地服务后，可在另一终端运行页面业务场景验收：
+
+```bash
+npm run test:browser
+```
+
+默认页面验收仅使用公开的合成数据，覆盖模块切换、人工多板导入、框选与缩放、注释草稿保护、分析 QC、项目导出和重新打开。若本机存在经授权的仪器文件，可通过环境变量增加 adapter 场景：
+
+```bash
+CCK8_XLS=/absolute/path/cck8.xlsx \
+DUAL_LUC_XLS=/absolute/path/dual-luciferase.xlsx \
+VICTOR_XLS=/absolute/path/resazurin.xls \
+npm run test:browser
+```
+
 真实仪器文件和厂商 demo 不上传到公开仓库。将获授权的数据放入本地 `tests/fixtures/` 与 `酶标仪demo/` 后，可运行：
 
 ```bash
@@ -75,6 +96,21 @@ npm run test:unit
 ```
 
 对应回归覆盖 96 孔 Varioskan CCK-8 文件，以及 ATP kinetic、BSA spectrum/concentration/purity、alamarBlue standard curve 和 Firefly/Renilla ratio。缺少本地数据时，相关 Vitest suite 会明确标记为 skipped。
+
+## 代码结构
+
+项目采用“深 module + adapter”的结构，interface 同时作为测试表面：
+
+- `src/core/plate-workspace.ts`：Plate workspace 的状态转换、分析范围和派生视图；React 不再拥有科研工作流策略。
+- `src/core/plate-aggregate.ts`：原始读数与可编辑孔注释的 canonical aggregate；所有投影和同步规则集中在这一处。
+- `src/core/import.ts`：统一导入 interface；浏览器 `File` 与测试内存文件都通过相同 seam。
+- `src/core/instruments/registry.ts`：厂商格式 adapters、格式探测和结构化诊断。
+- `src/core/artifacts.ts`：版本化 project、分析包及 CSV artifact 的单一 schema/version 来源。
+- `src/adapters/browser-download.ts`：浏览器下载副作用，不包含科研计算。
+- `scripts/acceptance-harness.mjs`：在线与离线页面测试共用的浏览器 adapter、fixture 和断言工具。
+- `CONTEXT.md`：领域词汇；`docs/adr/`：需要长期保留的架构决策。
+
+维护时优先从上述 interface 编写行为测试。实现被新 interface 测试覆盖后，应替换旧测试和旧路径，不在旁边长期叠加兼容 helper。
 
 ## 板图模板
 
@@ -88,9 +124,9 @@ A2,control,A549_NC_B1,NC,siNC,,Day0,B1,T2,
 
 `sample_id` 应在同一生物学重复的技术复孔之间保持一致。排除孔应明确记录 `excluded=true` 和原因，原始读值不会被覆盖。
 
-## 扩展接口
+## 扩展 interface
 
-- 仪器格式：在 `src/core/instruments/` 增加 adapter，将文件统一解析为 `ParsedPlate`。
+- 仪器格式：在 `src/core/instruments/` 增加 adapter，并在 `registry.ts` 注册，将文件统一规范化为 `ParsedPlate`。
 - 实验类型：在 `src/core/assays/` 增加分析模块，将逐孔数据转换为实验特异结果。
 - 模块工作流：在 `src/core/assay-workflows.ts` 集中声明检测方式、能力状态、必需信息、可用分析、延后分析和注释指引；UI 只消费这一处定义。
 

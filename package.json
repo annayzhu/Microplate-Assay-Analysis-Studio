@@ -1,6 +1,6 @@
 {
   "name": "microplate-assay-studio",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -13,6 +13,8 @@
     "build:sites": "npm run build:offline && node scripts/build-sites.mjs",
     "typecheck": "tsc -b --pretty false",
     "test:unit": "vitest run",
+    "test:browser": "node scripts/visual-smoke.mjs .artifacts/browser",
+    "test:offline": "node scripts/offline-smoke.mjs release/Microplate-Assay-Studio-Offline.html",
     "test:real": "node --import tsx scripts/validate-real-file.ts",
     "test": "npm run test:unit && npm run build"
   },
@@ -26,6 +28,7 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "playwright": "^1.62.1",
     "tsx": "^4.23.5",
     "typescript": "5.9.3",
     "vite": "8.2.1",
