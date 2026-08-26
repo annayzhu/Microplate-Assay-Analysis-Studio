@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyLayoutText, layoutTemplateCsv, plateTemplateDefinitions } from "../src/core/layout";
+import { applyLayoutText, currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText } from "../src/core/layout";
 import type { WellRecord } from "../src/core/types";
 
 function well(address: string): WellRecord {
@@ -96,5 +96,47 @@ describe("layout mapping", () => {
     expect(dataLines[3].startsWith("D1,")).toBe(true);
     expect(dataLines[4].startsWith("A2,")).toBe(true);
     expect(dataLines.at(-1)?.startsWith("D6,")).toBe(true);
+  });
+
+  it("round-trips the current annotation snapshot without exporting or changing raw readings", () => {
+    const source = [
+      { ...well("A1"), role: "control" as const, group: "Control", biologicalReplicate: "Bio1", technicalReplicate: "T1", notes: "comma, quote \" and line\nbreak" },
+      { ...well("A2"), role: "blank" as const, group: "", biologicalReplicate: "", technicalReplicate: "", excluded: true },
+    ];
+    const csv = currentPlateLayoutCsv({ rows: 8, columns: 12, plateName: "Reuse plate", wells: source });
+    const target = [
+      { ...well("A1"), rawValue: 9.81, group: "Old group" },
+      { ...well("A2"), rawValue: 7.14, group: "Must be cleared" },
+    ];
+    const preview = previewLayoutText(target, csv, { targetRows: 8, targetColumns: 12 });
+
+    expect(csv).not.toContain("raw_signal");
+    expect(preview).toMatchObject({ matched: 2, sourceWellCount: 2, plateShapeMismatch: false });
+    expect(preview.metadata).toMatchObject({ schemaVersion: 1, mode: "snapshot", plateRows: 8, plateColumns: 12, plateName: "Reuse plate" });
+    expect(preview.wells[0]).toMatchObject({ rawValue: 9.81, role: "control", group: "Control", notes: 'comma, quote " and line break' });
+    expect(preview.wells[1]).toMatchObject({ rawValue: 7.14, role: "blank", group: "", excluded: true });
+  });
+
+  it("previews plate-shape mismatches and can clear imported biological replicate identities", () => {
+    const csv = [
+      "# microplate_layout_schema_version=1",
+      "# layout_mode=snapshot",
+      "# plate_rows=8",
+      "# plate_columns=12",
+      "well,role,group,biological_replicate,technical_replicate",
+      "A1,sample,Treatment,Bio1,T1",
+      "H12,blank,,,",
+    ].join("\n");
+    const preview = previewLayoutText([well("A1")], csv, {
+      biologicalReplicateMode: "clear",
+      targetRows: 2,
+      targetColumns: 3,
+    });
+
+    expect(preview.plateShapeMismatch).toBe(true);
+    expect(preview.matched).toBe(1);
+    expect(preview.outOfPlateWells).toEqual(["H12"]);
+    expect(preview.wells[0]).toMatchObject({ group: "Treatment", biologicalReplicate: "", technicalReplicate: "T1", rawValue: 0.2 });
+    expect(preview.warnings[0]).toContain("当前数据板为 2 × 3");
   });
 });

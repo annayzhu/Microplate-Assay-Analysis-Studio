@@ -4,7 +4,7 @@ import { createArtifact, toolIdentity } from "./core/artifacts";
 import { assayModules, detectedAssayModule, getAssayWorkflow } from "./core/assay-workflows";
 import { importPlateReadings } from "./core/import";
 import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
-import { applyLayoutText, layoutTemplateCsv, plateTemplateDefinitions, type LayoutPatch } from "./core/layout";
+import { currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText, type LayoutPatch } from "./core/layout";
 import {
   defaultAnalysisConfig,
   openPlateWorkspace,
@@ -42,6 +42,19 @@ type BatchDraft = {
 
 const wellRoles: WellRole[] = ["unassigned", "sample", "control", "qc", "blank", "standard"];
 const defaultLayoutTemplateId = "96";
+
+const layoutFieldLabels: Record<keyof LayoutPatch, string> = {
+  role: "孔角色",
+  sampleId: "样本 ID",
+  group: "分组",
+  treatment: "处理",
+  concentration: "浓度",
+  timepoint: "时间点",
+  biologicalReplicate: "生物学重复",
+  technicalReplicate: "技术重复",
+  excluded: "排除状态",
+  notes: "备注",
+};
 
 const emptyBatchDraft: BatchDraft = {
   role: "",
@@ -160,6 +173,9 @@ export default function App() {
   const [readingTemplateId, setReadingTemplateId] = useState(defaultLayoutTemplateId);
   const [readingTemplatePlateCount, setReadingTemplatePlateCount] = useState(1);
   const [layoutTemplateId, setLayoutTemplateId] = useState(defaultLayoutTemplateId);
+  const [pendingLayoutFile, setPendingLayoutFile] = useState<{ name: string; text: string } | null>(null);
+  const [layoutBiologicalMode, setLayoutBiologicalMode] = useState<"preserve" | "clear">("preserve");
+  const [layoutMismatchConfirmed, setLayoutMismatchConfirmed] = useState(false);
   const [batchDraft, setBatchDraft] = useState<BatchDraft>(emptyBatchDraft);
   const [draftStatus, setDraftStatus] = useState<DraftStatus>("idle");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -222,6 +238,13 @@ export default function App() {
   const displayedAnnotatedWells = displayedAnalysis.annotatedWells;
   const displayedTechnicalSummaries = displayedAnalysis.technicalSummaries;
   const exportScope = workspaceView?.exportScope ?? "all";
+  const layoutImportPreview = useMemo(() => plate && pendingLayoutFile
+    ? previewLayoutText(wells, pendingLayoutFile.text, {
+      biologicalReplicateMode: layoutBiologicalMode,
+      targetRows: plate.rows,
+      targetColumns: plate.columns,
+    })
+    : null, [layoutBiologicalMode, pendingLayoutFile, plate, wells]);
 
   useEffect(() => {
     if (draftStatus !== "dirty") return;
@@ -235,6 +258,8 @@ export default function App() {
 
   function resetPlatePresentation(nextPlate: ParsedPlate) {
     setLayoutTemplateId(templateIdForPlate(nextPlate));
+    setPendingLayoutFile(null);
+    setLayoutMismatchConfirmed(false);
   }
 
   function clearBatchDraft() {
@@ -459,11 +484,38 @@ export default function App() {
     setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "toggle-summary", key }) : current);
   }
 
-  async function importLayoutFile(file: File) {
-    const result = applyLayoutText(wells, await file.text());
-    setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "replace-active-wells", wells: result.wells }) : current);
-    setNotice(`板图已匹配 ${result.applied} 个孔。${result.warnings.length ? `另有 ${result.warnings.length} 条提醒。` : ""}`);
-    setError(result.warnings.join(" "));
+  async function previewLayoutFile(file: File) {
+    if (!confirmDiscardDraft()) return;
+    clearBatchDraft();
+    setLayoutBiologicalMode("preserve");
+    setLayoutMismatchConfirmed(false);
+    setPendingLayoutFile({ name: file.name, text: await file.text() });
+    setNotice("板布局文件已读取，请核对匹配范围和重复编号处理方式后再应用。");
+    setError("");
+  }
+
+  function applyPendingLayout() {
+    if (!layoutImportPreview?.matched || (layoutImportPreview.plateShapeMismatch && !layoutMismatchConfirmed)) return;
+    setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "replace-active-wells", wells: layoutImportPreview.wells }) : current);
+    setNotice(`已将布局应用到 ${layoutImportPreview.matched} 个孔；当前板原始读数未改变。`);
+    setError(layoutImportPreview.warnings.join(" "));
+    setPendingLayoutFile(null);
+    setLayoutMismatchConfirmed(false);
+  }
+
+  function downloadCurrentLayout() {
+    if (!plate) return;
+    if (draftStatus === "dirty") {
+      setError("右侧仍有尚未应用的注释。请先应用或清空填写，再导出当前板布局。");
+      return;
+    }
+    const safePlateName = plate.metadata.plateName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/g, "-").replace(/^-+|-+$/g, "") || "plate";
+    downloadTextFile(
+      `${safePlateName}-reusable-layout.csv`,
+      currentPlateLayoutCsv({ rows: plate.rows, columns: plate.columns, plateName: plate.metadata.plateName, wells }),
+      "text/csv",
+    );
+    setNotice("当前板布局已导出；文件仅包含孔位注释，不包含原始读数和分析结果。");
   }
 
   function exportFiles(kind: "wells" | "technical" | "biological" | "package") {
@@ -612,14 +664,39 @@ export default function App() {
         <div className="section-heading split">
           <div><p className="eyebrow">02 · PLATE IDENTITY</p><h2>板图与实验注释</h2><p>{activeModule.annotationGuidance} 仪器标签不是实验分组，系统不会根据原始读数高低猜测角色或重复。</p></div>
           <div className="inline-actions">
-            <input ref={layoutInput} hidden type="file" accept=".csv,.tsv,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLayoutFile(file); event.target.value = ""; }} />
+            <input ref={layoutInput} hidden type="file" accept=".csv,.tsv,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewLayoutFile(file); event.target.value = ""; }} />
             <select className="template-select" value={layoutTemplateId} onChange={(event) => setLayoutTemplateId(event.target.value)} aria-label="板图模板类型">
               {plateTemplateDefinitions.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
             </select>
             <button className="secondary-button" type="button" onClick={() => downloadTextFile(`microplate-layout-template-${selectedTemplate.id}well.csv`, layoutTemplateCsv(selectedTemplate), "text/csv")}>下载板图模板</button>
-            <button className="secondary-button" type="button" onClick={() => layoutInput.current?.click()}>导入板图</button>
+            <button className="secondary-button" type="button" onClick={downloadCurrentLayout}>导出当前板布局</button>
+            <button className="secondary-button" type="button" onClick={() => layoutInput.current?.click()}>导入板布局</button>
           </div>
         </div>
+        {layoutImportPreview && pendingLayoutFile ? <section className="layout-import-preview" aria-label="板布局导入预览">
+          <div className="layout-import-preview-head">
+            <div><p className="eyebrow">LAYOUT PREVIEW</p><h3>板布局导入预览</h3><p>{pendingLayoutFile.name}{layoutImportPreview.metadata.plateName ? ` · 来源板：${layoutImportPreview.metadata.plateName}` : ""}</p></div>
+            <button type="button" className="secondary-button mini" onClick={() => setPendingLayoutFile(null)}>取消</button>
+          </div>
+          <div className="layout-preview-metrics">
+            <div><strong>{layoutImportPreview.matched}</strong><span>成功匹配孔</span></div>
+            <div><strong>{layoutImportPreview.sourceWellCount}</strong><span>文件孔位</span></div>
+            <div><strong>{layoutImportPreview.outOfPlateWells.length}</strong><span>超出当前板</span></div>
+            <div><strong>{layoutImportPreview.metadata.plateRows && layoutImportPreview.metadata.plateColumns ? `${layoutImportPreview.metadata.plateRows} × ${layoutImportPreview.metadata.plateColumns}` : "未声明"}</strong><span>来源板型</span></div>
+          </div>
+          <div className="layout-preview-details">
+            <div><strong>将更新的注释字段</strong><p>{layoutImportPreview.affectedFields.map((field) => layoutFieldLabels[field]).join("、") || "未识别到可更新字段"}</p></div>
+            <fieldset>
+              <legend>生物学重复</legend>
+              <label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "preserve"} onChange={() => setLayoutBiologicalMode("preserve")} />沿用布局文件中的编号</label>
+              <label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "clear"} onChange={() => setLayoutBiologicalMode("clear")} />清空后为本次独立实验重新填写</label>
+              <p>技术重复的孔位关系会继续沿用；新检测的原始读数始终保持不变。</p>
+            </fieldset>
+          </div>
+          {layoutImportPreview.warnings.length ? <ul className="layout-preview-warnings">{layoutImportPreview.warnings.slice(0, 8).map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+          {layoutImportPreview.plateShapeMismatch ? <label className="check-row layout-mismatch-confirm"><input type="checkbox" checked={layoutMismatchConfirmed} onChange={(event) => setLayoutMismatchConfirmed(event.target.checked)} />我已核对不同板型，只将地址一致的孔位注释应用到当前板</label> : null}
+          <div className="layout-preview-actions"><button type="button" className="primary-button" disabled={!layoutImportPreview.matched || (layoutImportPreview.plateShapeMismatch && !layoutMismatchConfirmed)} onClick={applyPendingLayout}>应用到当前板的 {layoutImportPreview.matched} 个孔</button></div>
+        </section> : null}
         <div className="layout-grid">
           <div className="panel plate-panel">
             <div className="panel-head plate-panel-head">

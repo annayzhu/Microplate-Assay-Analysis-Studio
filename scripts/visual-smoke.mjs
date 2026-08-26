@@ -127,6 +127,28 @@ try {
   await page.getByRole("button", { name: "进入板图与注释" }).click();
   await page.locator('[data-well="H12"]').click();
   if (!(await page.locator(".well-detail").innerText()).includes("ManualGroup")) throw new Error("Project round-trip did not restore current annotations.");
+  const rawValueBeforeLayoutRoundTrip = await page.locator('[data-well="H12"] strong').innerText();
+  const layoutDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出当前板布局" }).click();
+  const layoutDownload = await layoutDownloadEvent;
+  const layoutPath = await layoutDownload.path();
+  if (!layoutPath || !layoutDownload.suggestedFilename().includes("reusable-layout.csv")) throw new Error("Reusable plate-layout export was not produced.");
+  await page.locator('input[type="file"][accept=".csv,.tsv,.txt"]').setInputFiles(layoutPath);
+  await page.getByRole("heading", { name: "板布局导入预览" }).waitFor();
+  const layoutPreviewText = await page.getByLabel("板布局导入预览").innerText();
+  for (const signal of ["96", "成功匹配孔", "来源板型", "8 × 12", "新检测的原始读数始终保持不变"]) {
+    if (!layoutPreviewText.includes(signal)) throw new Error(`Reusable layout preview is missing expected signal: ${signal}`);
+  }
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-import-preview.png"), fullPage: true });
+  await page.getByText("清空后为本次独立实验重新填写", { exact: false }).click();
+  await page.getByRole("button", { name: "应用到当前板的 96 个孔" }).click();
+  if (await page.locator('[data-well="H12"] strong').innerText() !== rawValueBeforeLayoutRoundTrip) throw new Error("Layout import changed the displayed raw reading.");
+  const restoredLayoutDetail = await page.locator(".well-detail").innerText();
+  if (!restoredLayoutDetail.includes("ManualGroup")) throw new Error(`Reusable layout import did not restore annotations.\n${restoredLayoutDetail}`);
+  await page.getByLabel("分组 · Group").fill("AdjustedGroup");
+  await page.getByRole("button", { name: "应用到所选 1 个孔" }).click();
+  if (!(await page.locator(".well-detail").innerText()).includes("AdjustedGroup")) throw new Error("Imported layout could not be adjusted after application.");
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-reuse.png"), fullPage: true });
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   await page.getByRole("tab", { name: "仪器结果文件" }).click();
 
