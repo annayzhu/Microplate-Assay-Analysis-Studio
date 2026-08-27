@@ -70,7 +70,7 @@ const emptyBatchDraft: BatchDraft = {
 };
 
 function format(value: number | null, digits = 3): string {
-  return value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+  return value === null || !Number.isFinite(value) ? "未记录" : value.toFixed(digits);
 }
 
 function detectionModeLabel(mode: DetectionMode): string {
@@ -84,8 +84,8 @@ function methodEvidenceLabel(plate: ParsedPlate): string {
 function measurementChannel(plate: ParsedPlate): string {
   const metadata = plate.metadata;
   if (metadata.detectionMode === "fluorescence") {
-    const excitation = metadata.excitationWavelengthNm ? `Ex ${metadata.excitationWavelengthNm} nm` : "Ex —";
-    const emission = metadata.emissionWavelengthNm ? `Em ${metadata.emissionWavelengthNm} nm` : "Em —";
+    const excitation = metadata.excitationWavelengthNm ? `Ex ${metadata.excitationWavelengthNm} nm` : "Ex 未记录";
+    const emission = metadata.emissionWavelengthNm ? `Em ${metadata.emissionWavelengthNm} nm` : "Em 未记录";
     return `${excitation} / ${emission}`;
   }
   if (metadata.wavelengthNm) {
@@ -93,11 +93,11 @@ function measurementChannel(plate: ParsedPlate): string {
       ? `${metadata.wavelengthNm} nm / ref ${metadata.referenceWavelengthNm} nm`
       : `${metadata.wavelengthNm} nm`;
   }
-  return metadata.measurementName || "—";
+  return metadata.measurementName || "未记录";
 }
 
 function instrumentDisplay(plate: ParsedPlate): string {
-  return [plate.metadata.instrumentManufacturer, plate.metadata.instrumentModel].filter(Boolean).join(" · ") || "—";
+  return [plate.metadata.instrumentManufacturer, plate.metadata.instrumentModel].filter(Boolean).join(" · ") || "未记录";
 }
 
 function readSettingDisplay(plate: ParsedPlate): string {
@@ -109,7 +109,7 @@ function readSettingDisplay(plate: ParsedPlate): string {
       ? `${metadata.temperatureStartC}→${metadata.temperatureEndC} °C`
       : "",
   ].filter(Boolean);
-  return items.join(" · ") || "—";
+  return items.join(" · ") || "未记录";
 }
 
 function formatRawSignal(plate: ParsedPlate, value: number): string {
@@ -124,9 +124,9 @@ function rawSignalLabel(plate: ParsedPlate): string {
 
 const summaryTableColumns: Array<{ key: string; header: string; render: (row: BiologicalSummary) => string | number }> = [
   { key: "group", header: "Group", render: (row) => row.group },
-  { key: "treatment", header: "Treatment", render: (row) => row.treatment || "—" },
-  { key: "concentration", header: "Conc.", render: (row) => row.concentration || "—" },
-  { key: "timepoint", header: "Time", render: (row) => row.timepoint || "—" },
+  { key: "treatment", header: "Treatment", render: (row) => row.treatment || "未记录" },
+  { key: "concentration", header: "Conc.", render: (row) => row.concentration || "未记录" },
+  { key: "timepoint", header: "Time", render: (row) => row.timepoint || "未记录" },
   { key: "nBiological", header: "n bio", render: (row) => row.nBiological },
   { key: "correctedMean", header: "Mean", render: (row) => format(row.correctedMean) },
   { key: "correctedSd", header: "SD", render: (row) => format(row.correctedSd) },
@@ -580,8 +580,8 @@ export default function App() {
       {error ? <div className="notice warning" role="alert">{error}<button type="button" onClick={() => setError("")}>×</button></div> : null}
 
       {view === "import" ? <section className="workspace import-workspace">
-        <div className="section-heading">
-          <div><p className="eyebrow">01 · PLATE READINGS</p><h2>导入孔板读数</h2><p>当前模块：{selectedModule.name} · {selectedModule.measurementTarget}。可以导入仪器结果，也可以粘贴 Excel 矩阵或填写标准读数模板；全部数据只在浏览器本地处理。</p></div>
+        <div className="section-heading split">
+          <div><h2>导入孔板读数</h2><p>当前模块：{selectedModule.name} · {selectedModule.measurementTarget}。可以导入仪器结果，也可以粘贴 Excel 矩阵或填写标准读数模板；全部数据只在浏览器本地处理。</p></div>
           <div className="import-heading-actions">{plate ? <><span className="adapter-badge">{plate.metadata.adapterId}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></> : null}<input ref={projectInput} hidden type="file" accept=".json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewProjectFile(file); event.target.value = ""; }} /><button type="button" className="secondary-button mini" onClick={() => projectInput.current?.click()}>重新打开项目文件</button></div>
         </div>
         <AssayWorkflowPanel module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
@@ -657,7 +657,7 @@ export default function App() {
             <Metric label="检测模式" value={detectionModeLabel(plate.metadata.detectionMode)} detail={`${plate.metadata.measurementName || "未命名通道"} · ${plate.metadata.signalUnit || "无单位"}`} />
             <Metric label="读数通道" value={measurementChannel(plate)} detail={plate.metadata.detectionMode === "fluorescence" ? "激发 / 发射" : "主波长 / 参比波长"} />
             <Metric label="仪器" value={instrumentDisplay(plate)} detail={plate.metadata.instrumentSerialNumber ? `S/N ${plate.metadata.instrumentSerialNumber}` : "序列号未记录"} />
-            <Metric label="运行" value={plate.metadata.runTimestamp || "—"} detail={plate.metadata.assayId ? `Assay ID ${plate.metadata.assayId}` : "Assay ID 未记录"} />
+            <Metric label="运行" value={plate.metadata.runTimestamp || "未记录"} detail={plate.metadata.assayId ? `Assay ID ${plate.metadata.assayId}` : "Assay ID 未记录"} />
             <Metric label="板型" value={`${plate.rows} × ${plate.columns} · ${plate.rows * plate.columns} 孔`} detail={`${plate.wells.length} 个已测孔 · ${plate.metadata.plateType || "板型未命名"}`} />
             <Metric label="读板设置" value={readSettingDisplay(plate)} detail={plate.metadata.readDirection ? `原文：${plate.metadata.readDirection}` : "文件未记录读板方向"} />
             <Metric label="来源" value={plate.metadata.sourceFileName} detail={plate.metadata.protocolName || plate.metadata.sourceExperiment || "协议名未记录"} />
@@ -669,7 +669,7 @@ export default function App() {
 
       {view === "layout" && plate ? <section className="workspace">
         <div className="section-heading split">
-          <div><p className="eyebrow">02 · PLATE IDENTITY</p><h2>板图与实验注释</h2><p>{activeModule.annotationGuidance} 仪器标签不是实验分组，系统不会根据原始读数高低猜测角色或重复。</p></div>
+          <div><h2>板图与实验注释</h2><p>{activeModule.annotationGuidance} 仪器标签不是实验分组，系统不会根据原始读数高低猜测角色或重复。</p></div>
           <div className="inline-actions">
             <input ref={layoutInput} hidden type="file" accept=".csv,.tsv,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewLayoutFile(file); event.target.value = ""; }} />
             <select className="template-select" value={layoutTemplateId} onChange={(event) => setLayoutTemplateId(event.target.value)} aria-label="板图模板类型">
@@ -753,7 +753,7 @@ export default function App() {
 
       {view === "analysis" && plate && useGenericWorkflow && plate.assayData ? <section className="workspace analysis-workspace">
         <div className="section-heading split compact-heading">
-          <div><p className="eyebrow">02 · RESULT EXPLORER</p><h2>分析与导出</h2><p>按 SkanIt 测量和计算步骤浏览终点、动力学、光谱、标准曲线与多通道归一化结果。</p></div>
+          <div><h2>分析与导出</h2><p>按 SkanIt 测量和计算步骤浏览终点、动力学、光谱、标准曲线与多通道归一化结果。</p></div>
           <span className="readiness ready">{assayStatusLabel(activeModule.status)}</span>
         </div>
         <AssayWorkflowPanel module={activeModule} plate={plate} />
@@ -762,7 +762,7 @@ export default function App() {
 
       {view === "analysis" && plate && !useGenericWorkflow ? <section className="workspace analysis-workspace">
         <div className="section-heading split compact-heading">
-          <div><p className="eyebrow">03 · QC & ANALYSIS</p><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和导出 CSV 都只保留当前展示范围。</p></div>
+          <div><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和导出 CSV 都只保留当前展示范围。</p></div>
           <div className="analysis-heading-actions"><span className={`readiness ${analysis.ready ? "ready" : "review"}`}>{analysis.ready ? "Ready for export" : "Review required"}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></div>
         </div>
         <div className="analysis-layout-compact">
@@ -801,7 +801,7 @@ export default function App() {
 
           <aside className="analysis-result-side">
             <div className="panel chart-panel compact-chart-panel"><div className="panel-head compact-panel-head"><div><h3>图表预览</h3><p>辅助查看趋势；正式结果以左侧汇总表和统计表为准。</p></div></div><SummaryChart rows={displayedBiologicalSummaries} normalized={Boolean(config.controlGroup)} compact yAxisLabel={`Blank-corrected signal${plate.metadata.signalUnit ? ` (${plate.metadata.signalUnit})` : ""}`} /></div>
-            <div className="panel table-panel significance-panel"><div className="panel-head compact-panel-head"><div><h3>显著性</h3><p>{selectedSummaryKeys.size ? "按当前点选行重新计算；自动加入同时间点 control 与 blank。" : "全表范围计算；单位是生物学重复，不把技术复孔当作独立 n。"}</p></div></div><div className="method-note"><strong>计算方法</strong><p>先扣除 blank，再合并同一 biological replicate 内的技术复孔。若处理组和对照组共享相同 B 编号，使用配对 t-test；无法配对时使用 Welch t-test。P 值用当前范围内的 Benjamini-Hochberg FDR 校正，星号按 FDR 标注。</p><p>推荐原则：单时间点两组比较用配对/独立 t-test；多处理组优先用 ANOVA + Dunnett 或 FDR；连续多时间点应考虑 two-way ANOVA 或混合效应模型。</p></div><div className="table-scroll compact"><table><thead><tr><th>Contrast</th><th>Method</th><th>n</th><th>Diff</th><th>P</th><th>FDR</th><th>Sig.</th></tr></thead><tbody>{displayedSignificanceComparisons.length ? displayedSignificanceComparisons.map((row) => <tr key={row.key}><td>{row.contrast}</td><td>{significanceMethodLabel(row.note)}</td><td>{row.nGroup}/{row.nControl}</td><td>{Number.isFinite(row.meanDifference) ? format(row.meanDifference) : "—"}</td><td>{row.pValue === null ? "n/a" : row.pValue.toPrecision(3)}</td><td>{row.adjustedPValue === null ? "n/a" : row.adjustedPValue.toPrecision(3)}</td><td>{row.label}</td></tr>) : <tr><td colSpan={7} className="empty-cell">{config.controlGroup ? "当前展示范围没有可比较的非对照组。" : "选择对照组后计算显著性。"}</td></tr>}</tbody></table></div></div>
+            <div className="panel table-panel significance-panel"><div className="panel-head compact-panel-head"><div><h3>显著性</h3><p>{selectedSummaryKeys.size ? "按当前点选行重新计算；自动加入同时间点 control 与 blank。" : "全表范围计算；单位是生物学重复，不把技术复孔当作独立 n。"}</p></div></div><div className="method-note"><strong>计算方法</strong><p>先扣除 blank，再合并同一 biological replicate 内的技术复孔。若处理组和对照组共享相同 B 编号，使用配对 t-test；无法配对时使用 Welch t-test。P 值用当前范围内的 Benjamini-Hochberg FDR 校正，星号按 FDR 标注。</p><p>推荐原则：单时间点两组比较用配对/独立 t-test；多处理组优先用 ANOVA + Dunnett 或 FDR；连续多时间点应考虑 two-way ANOVA 或混合效应模型。</p></div><div className="table-scroll compact"><table><thead><tr><th>Contrast</th><th>Method</th><th>n</th><th>Diff</th><th>P</th><th>FDR</th><th>Sig.</th></tr></thead><tbody>{displayedSignificanceComparisons.length ? displayedSignificanceComparisons.map((row) => <tr key={row.key}><td>{row.contrast}</td><td>{significanceMethodLabel(row.note)}</td><td>{row.nGroup}/{row.nControl}</td><td>{Number.isFinite(row.meanDifference) ? format(row.meanDifference) : "未计算"}</td><td>{row.pValue === null ? "n/a" : row.pValue.toPrecision(3)}</td><td>{row.adjustedPValue === null ? "n/a" : row.adjustedPValue.toPrecision(3)}</td><td>{row.label}</td></tr>) : <tr><td colSpan={7} className="empty-cell">{config.controlGroup ? "当前展示范围没有可比较的非对照组。" : "选择对照组后计算显著性。"}</td></tr>}</tbody></table></div></div>
           </aside>
         </div>
       </section> : null}

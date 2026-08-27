@@ -282,7 +282,7 @@ export function PlateMap({
                 }}
               >
                 <strong>{Math.abs(well.rawValue) >= 100 ? well.rawValue.toFixed(0) : well.rawValue.toFixed(3)}</strong>
-                <small>{well.group || well.instrumentLabel || "—"}</small>
+                <small>{well.group || well.instrumentLabel || "未指定"}</small>
               </button>;
             }),
           ])}
