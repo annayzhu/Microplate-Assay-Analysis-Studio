@@ -16,10 +16,20 @@ try {
     if (!landingText.includes(signal)) throw new Error(`Module capability states are missing: ${signal}`);
   }
   await page.getByRole("button", { name: /蛋白定量/ }).click();
+  const workflowDisclosure = page.locator(".assay-workflow-panel.compact-workflow");
+  if (await workflowDisclosure.count() !== 1) throw new Error("Compact assay guidance disclosure is missing from the import workspace.");
+  if (await workflowDisclosure.getAttribute("open") !== null) throw new Error("Assay guidance should be collapsed by default.");
+  const importControlBounds = await page.locator(".dropzone").boundingBox();
+  const workflowDisclosureBounds = await workflowDisclosure.boundingBox();
+  if (!importControlBounds || !workflowDisclosureBounds || workflowDisclosureBounds.y <= importControlBounds.y) {
+    throw new Error("Assay guidance is not positioned below the active import control.");
+  }
+  await workflowDisclosure.locator("summary").click();
   const proteinText = await page.locator("body").innerText();
   for (const signal of ["标准品浓度和单位", "仪器标准曲线核查", "本系统标准曲线复算"]) {
     if (!proteinText.includes(signal)) throw new Error(`Protein workflow guidance is missing: ${signal}`);
   }
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-guidance-expanded.png"), fullPage: true });
   for (const tabName of ["仪器结果文件", "粘贴孔板读数", "读数模板"]) {
     if (!await page.getByRole("tab", { name: tabName }).isVisible()) throw new Error(`Shared import tab is missing from protein workflow: ${tabName}`);
   }
@@ -28,7 +38,14 @@ try {
   await page.getByRole("button", { name: /单 \/ 双荧光素酶/ }).click();
   if (!(await page.locator("body").innerText()).includes("Firefly 与 Renilla 步骤映射")) throw new Error("Luciferase-specific workflow guidance is missing.");
   await page.getByRole("button", { name: /细胞活性 \/ 细胞增殖/ }).click();
+  if (await workflowDisclosure.getAttribute("open") !== null) await workflowDisclosure.locator("summary").click();
+  if (!(await workflowDisclosure.innerText()).includes("支持吸光、荧光和发光型细胞活性读数")) throw new Error("Cell-viability guidance does not name all supported detection modes.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-start.png"), fullPage: true });
+  await page.setViewportSize({ width: 980, height: 1000 });
+  const importOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (importOverflow > 1) throw new Error(`Compact import workspace has ${importOverflow}px of page-level horizontal overflow.`);
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-import-narrow.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   const topbarBounds = await page.locator(".topbar").boundingBox();
   const assayStripBounds = await page.locator(".assay-strip").boundingBox();
   const sectionCopySize = Number.parseFloat(await page.locator(".section-heading p").first().evaluate((element) => getComputedStyle(element).fontSize));

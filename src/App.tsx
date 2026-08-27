@@ -584,16 +584,6 @@ export default function App() {
           <div><h2>导入孔板读数</h2><p>当前模块：{selectedModule.name} · {selectedModule.measurementTarget}。可以导入仪器结果，也可以粘贴 Excel 矩阵或填写标准读数模板；全部数据只在浏览器本地处理。</p></div>
           <div className="import-heading-actions">{plate ? <><span className="adapter-badge">{plate.metadata.adapterId}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></> : null}<input ref={projectInput} hidden type="file" accept=".json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewProjectFile(file); event.target.value = ""; }} /><button type="button" className="secondary-button mini" onClick={() => projectInput.current?.click()}>重新打开项目文件</button></div>
         </div>
-        <AssayWorkflowPanel module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
-        <details className="experiment-record" open={Boolean(experiment.name || experiment.operator || experiment.date || experiment.notes)}>
-          <summary>实验记录信息 <small>随可复现项目和溯源导出保存</small></summary>
-          <div className="experiment-record-grid">
-            <Field label="实验名称"><input value={experiment.name} onChange={(event) => updateExperiment({ name: event.target.value })} placeholder="例如 Drug response · Day 2" /></Field>
-            <Field label="操作者"><input value={experiment.operator} onChange={(event) => updateExperiment({ operator: event.target.value })} /></Field>
-            <Field label="实验日期"><input type="date" value={experiment.date} onChange={(event) => updateExperiment({ date: event.target.value })} /></Field>
-            <Field label="项目备注"><input value={experiment.notes} onChange={(event) => updateExperiment({ notes: event.target.value })} /></Field>
-          </div>
-        </details>
         <div className="import-source-tabs" role="tablist" aria-label="孔板读数来源">
           <button type="button" role="tab" aria-selected={importMode === "instrument"} className={importMode === "instrument" ? "active" : ""} onClick={() => { setImportMode("instrument"); setPendingBatch(null); }}>仪器结果文件</button>
           <button type="button" role="tab" aria-selected={importMode === "paste"} className={importMode === "paste" ? "active" : ""} onClick={() => { setImportMode("paste"); setPendingBatch(null); }}>粘贴孔板读数</button>
@@ -627,6 +617,17 @@ export default function App() {
             <button type="button" className="dropzone compact-dropzone" disabled={loading} onClick={() => readingTemplateInput.current?.click()}><span className="dropzone-icon">XLSX</span><span><strong>{loading ? "正在解析…" : "导入已填写的读数模板"}</strong><small>每块板使用一个工作表；也支持一个工作表内连续排列多个固定矩阵。</small></span><b>Browse</b></button>
           </>}
         </div>}
+
+        <AssayWorkflowPanel variant="disclosure" module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
+        <details className="experiment-record" open={Boolean(experiment.name || experiment.operator || experiment.date || experiment.notes)}>
+          <summary>实验记录信息 <small>随可复现项目和溯源导出保存</small></summary>
+          <div className="experiment-record-grid">
+            <Field label="实验名称"><input value={experiment.name} onChange={(event) => updateExperiment({ name: event.target.value })} placeholder="例如 Drug response · Day 2" /></Field>
+            <Field label="操作者"><input value={experiment.operator} onChange={(event) => updateExperiment({ operator: event.target.value })} /></Field>
+            <Field label="实验日期"><input type="date" value={experiment.date} onChange={(event) => updateExperiment({ date: event.target.value })} /></Field>
+            <Field label="项目备注"><input value={experiment.notes} onChange={(event) => updateExperiment({ notes: event.target.value })} /></Field>
+          </div>
+        </details>
 
         {pendingBatch ? <div className="import-preview" aria-label="导入预览">
           <div className="import-preview-head"><div><h3>导入预览与实验类型确认</h3><p>识别到 {pendingBatch.plates.length} 块独立孔板；确认后才会替换当前工作区。</p></div><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : pendingBatch.sourceKind === "reading-template" ? "读数模板" : pendingBatch.sourceKind === "project-file" ? "可复现项目" : "仪器文件"}</span></div>
