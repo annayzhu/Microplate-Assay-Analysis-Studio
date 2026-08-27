@@ -11,7 +11,7 @@ export const assayModules: AssayModuleDefinition[] = [
     shortName: "CCK-8 · MTT · alamarBlue",
     name: "细胞活性 / 细胞增殖",
     measurementTarget: "细胞代谢活性与相对存活/增殖",
-    description: "兼容吸光、荧光等读数；区分具体方法、原始信号、空白处理、重复层级与对照归一化。",
+    description: "支持吸光、荧光和发光型细胞活性读数，并按具体方法处理空白、重复与对照归一化。",
     detectionModes: ["absorbance", "fluorescence", "luminescence"],
     status: "complete",
     supportedMethods: ["CCK-8 / WST-8", "MTT", "Resazurin / alamarBlue"],
@@ -168,7 +168,7 @@ export function assayWorkflowFacts(plate: ParsedPlate, moduleId: AssayModuleId):
     const maxTime = Math.max(0, ...kinetics.flatMap((series) => series.points.map((point) => point.timeSeconds ?? 0)));
     return [
       { label: "读取模式", value: kinetics.length ? `动力学 · ${kinetics.length} 个步骤` : "终点/归约步骤", evidence: "instrument" },
-      { label: "时间范围", value: maxTime ? `0–${maxTime.toLocaleString()} s` : "未确认", evidence: maxTime ? "instrument" : "missing" },
+      { label: "时间范围", value: maxTime ? `0-${maxTime.toLocaleString()} s` : "未确认", evidence: maxTime ? "instrument" : "missing" },
       { label: "标准曲线", value: dataset?.standardCurves.length ? `${dataset.standardCurves.length} 条仪器曲线` : "未提供", evidence: dataset?.standardCurves.length ? "instrument" : "missing" },
       missing("积分/选取窗口"),
     ];
