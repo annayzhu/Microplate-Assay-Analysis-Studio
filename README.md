@@ -1,6 +1,6 @@
 # Microplate Assay Studio
 
-面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.5.2，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
+面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.5.3，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
 
 ## 工具定位
 
@@ -21,7 +21,7 @@
 6. 支持 CCK-8/MTT/Resazurin/alamarBlue、BSA 蛋白定量与光谱、ATP 发光定量和 Dual-Luciferase demo 流程。
 7. 对 CCK-8 类组间实验，区分技术复孔与生物学重复，完成空白扣除、QC、对照归一化及显著性分析；同一块板允许存在多个独立的生物学重复，但技术复孔仍先在各自生物学重复内汇总。
 8. 对 ATP、BSA、alamarBlue 标准曲线和 Dual-Luciferase，逐步展示 SkanIt 原始测量与仪器计算结果，不擅自替换仪器算法。
-9. 导出包含当前孔注释、模块确认、选择决策、来源适配器、测量步骤和全部数据点的 tidy long-table CSV；CCK-8 流程另可导出孔级、技术复孔和生物学汇总结果。汇总 CSV 的主值固定为 blank-corrected signal；相对 Control 的百分比使用独立派生列，不覆盖后续跨时间分析所需的基础值。
+9. 导出包含当前孔注释、模块确认、选择决策、来源适配器、测量步骤和全部数据点的 tidy long-table CSV；CCK-8 流程另可导出孔级、技术复孔和生物学汇总结果。汇总 CSV 只保留明确命名的 `blank_corrected_*` 基础列和 `relative_to_control_*` 派生列，不设置重复的通用 `value / sd / sem` 别名。
 10. 可保存并重新打开浏览器本地的可复现项目文件，恢复原始读值、当前注释、实验基本信息、模块识别/确认和分析配置。
 11. 无仪器原始文件时，可直接粘贴 Excel 中的固定孔板矩阵，或下载并填写 6/12/24/48/96/384 孔读数模板后导入。
 12. 同一次粘贴或模板导入可识别多块板；每块板保留独立名称、注释和分析状态，不会自动合并为生物学重复。

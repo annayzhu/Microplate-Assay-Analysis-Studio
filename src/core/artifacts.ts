@@ -74,7 +74,7 @@ function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedP
 function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): string {
   const comparisonByGroup = new Map(result.significanceComparisons.map((comparison) => [[comparison.group, comparison.treatment, comparison.concentration, comparison.timepoint].join("¦"), comparison]));
   const headers = [
-    "category", "value", "sd", "sem", "signal_basis", "group", "treatment", "concentration", "timepoint", "n_biological",
+    "category", "group", "treatment", "concentration", "timepoint", "n_biological", "signal_basis",
     "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
     "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
     "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source",
@@ -83,9 +83,9 @@ function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: Parsed
     const comparison = comparisonByGroup.get([row.group, row.treatment, row.concentration, row.timepoint].join("¦"));
     return {
       category: [row.group, row.concentration, row.timepoint].filter(Boolean).join(" · "),
-      value: row.correctedMean, sd: row.correctedSd, sem: row.correctedSem, signal_basis: "blank-corrected",
       group: row.group, treatment: row.treatment,
       concentration: row.concentration, timepoint: row.timepoint, n_biological: row.nBiological,
+      signal_basis: "blank-corrected",
       blank_corrected_mean: row.correctedMean, blank_corrected_sd: row.correctedSd, blank_corrected_sem: row.correctedSem,
       relative_to_control_percent: row.relativeActivityPercent, relative_to_control_sd_percent: row.relativeSdPercent,
       relative_to_control_sem_percent: row.relativeSemPercent,
