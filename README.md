@@ -1,6 +1,6 @@
 # Microplate Assay Studio
 
-面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.5.3，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
+面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.5.4，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
 
 ## 工具定位
 

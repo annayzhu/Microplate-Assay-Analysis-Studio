@@ -29,6 +29,13 @@ try {
   if (!(await page.locator("body").innerText()).includes("Firefly 与 Renilla 步骤映射")) throw new Error("Luciferase-specific workflow guidance is missing.");
   await page.getByRole("button", { name: /细胞活性 \/ 细胞增殖/ }).click();
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-start.png"), fullPage: true });
+  const topbarBounds = await page.locator(".topbar").boundingBox();
+  const assayStripBounds = await page.locator(".assay-strip").boundingBox();
+  const sectionCopySize = Number.parseFloat(await page.locator(".section-heading p").first().evaluate((element) => getComputedStyle(element).fontSize));
+  if (!topbarBounds || topbarBounds.height > 60) throw new Error(`Top bar is no longer compact: ${topbarBounds?.height ?? "missing"}px.`);
+  if (!assayStripBounds || assayStripBounds.height > 230) throw new Error(`Assay selector is no longer compact: ${assayStripBounds?.height ?? "missing"}px.`);
+  if (sectionCopySize < 11) throw new Error(`Workspace copy is too small: ${sectionCopySize}px.`);
+  if (await page.locator(".eyebrow").count()) throw new Error("Redundant section eyebrow labels returned to the workspace.");
 
   if (process.env.CCK8_XLS) {
     await page.getByRole("button", { name: /蛋白定量/ }).click();
@@ -118,6 +125,8 @@ try {
   const compactAnnotation = await page.locator(".annotation-panel").boundingBox();
   if (!compactPlate || !compactAnnotation || compactAnnotation.y <= compactPlate.y) throw new Error("Narrow layout did not move the annotation panel below the plate.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-narrow.png"), fullPage: true });
+  const narrowOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (narrowOverflow > 1) throw new Error(`Narrow workspace has ${narrowOverflow}px of page-level horizontal overflow.`);
   await page.getByRole("button", { name: "收起批量注释" }).click();
   const compactCollapsedAnnotation = await page.locator(".annotation-panel").boundingBox();
   if (!compactCollapsedAnnotation || compactCollapsedAnnotation.height > 100) throw new Error("Narrow collapsed annotation panel did not become a compact horizontal bar.");

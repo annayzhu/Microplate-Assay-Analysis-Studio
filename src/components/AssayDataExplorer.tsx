@@ -4,7 +4,7 @@ import type { AssayDataset, MeasurementPoint, MeasurementSeries, StandardCurve }
 const palette = ["#1d4c50", "#d88962", "#5f7565", "#8b6f92", "#b18b52", "#54758a", "#a55f59", "#64714d"];
 
 function number(value: number | null, digits = 4): string {
-  if (value === null || !Number.isFinite(value)) return "—";
+  if (value === null || !Number.isFinite(value)) return "未记录";
   if (Math.abs(value) >= 10000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) return value.toExponential(3);
   return value.toLocaleString(undefined, { maximumFractionDigits: digits });
 }
@@ -89,7 +89,7 @@ export function AssayDataExplorer({ dataset, onExport, onExportProject }: { data
     </section>
     <div className="assay-result-grid">
       <section className="panel assay-preview-panel"><div className="panel-head compact-panel-head"><div><h3>{selected.name}</h3><p>{selected.source === "measured" ? "仪器测量" : "仪器计算"} · {selected.detectionMode} · {selected.signalUnit}</p></div></div><LinePreview series={selected} /></section>
-      <section className="panel assay-data-panel"><div className="panel-head compact-panel-head"><div><h3>结果明细</h3><p>当前步骤最多预览 300 行；导出文件包含全部结果。</p></div></div><div className="table-scroll"><table><thead><tr><th>Well</th><th>Sample</th><th>Group</th><th>Conc.</th><th>Time s</th><th>λ nm</th><th>Value</th><th>Type</th></tr></thead><tbody>{displayedPoints.map((point, index) => <tr key={`${point.well}-${index}`}><td>{point.well}</td><td>{point.sampleName || "—"}</td><td>{point.group || "—"}</td><td>{point.concentration === null ? "—" : `${number(point.concentration)} ${point.concentrationUnit}`}</td><td>{number(point.timeSeconds, 2)}</td><td>{number(point.wavelengthNm ?? point.emissionWavelengthNm ?? point.excitationWavelengthNm, 1)}</td><td>{number(point.value)}</td><td>{point.valueType}</td></tr>)}</tbody></table></div></section>
+      <section className="panel assay-data-panel"><div className="panel-head compact-panel-head"><div><h3>结果明细</h3><p>当前步骤最多预览 300 行；导出文件包含全部结果。</p></div></div><div className="table-scroll"><table><thead><tr><th>Well</th><th>Sample</th><th>Group</th><th>Conc.</th><th>Time s</th><th>λ nm</th><th>Value</th><th>Type</th></tr></thead><tbody>{displayedPoints.map((point, index) => <tr key={`${point.well}-${index}`}><td>{point.well}</td><td>{point.sampleName || "未记录"}</td><td>{point.group || "未记录"}</td><td>{point.concentration === null ? "未记录" : `${number(point.concentration)} ${point.concentrationUnit}`}</td><td>{number(point.timeSeconds, 2)}</td><td>{number(point.wavelengthNm ?? point.emissionWavelengthNm ?? point.excitationWavelengthNm, 1)}</td><td>{number(point.value)}</td><td>{point.valueType}</td></tr>)}</tbody></table></div></section>
     </div>
     {dataset.standardCurves.map((curve) => <StandardCurvePanel key={curve.id} curve={curve} />)}
     <div className="method-note assay-provenance-note"><strong>结果解释边界</strong><p>标准曲线、浓度、峰值、背景扣除和通道比值均优先展示 SkanIt 已导出的结果与公式；本工具不在缺少原始协议参数时擅自替换仪器算法。若要进行组间显著性检验，需补充真实独立的生物学重复；同一板可以包含多个独立 Bio，但每个 Bio 内的技术复孔不能作为独立 n。</p>{onExportProject ? <small>“可复现项目”用于以后恢复原始读数、注释、模块确认和参数；常规结果交换请优先使用 CSV。</small> : null}</div>
