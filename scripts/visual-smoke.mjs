@@ -161,6 +161,11 @@ try {
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
   if (!manualAnalysisText.includes("只保留语义明确的 blank_corrected_* 基础列")) throw new Error("Analysis UI did not explain the explicit export schema.");
+  const qcFindingRows = await page.locator(".qc-mini-list li").all();
+  const qcFindingHeights = await Promise.all(qcFindingRows.map(async (row) => (await row.boundingBox())?.height ?? Number.NaN));
+  if (qcFindingHeights.some((height) => height > 84)) throw new Error(`QC findings are no longer compact: ${qcFindingHeights.join(", ")}.`);
+  const qcListBounds = await page.locator(".qc-mini-list").boundingBox();
+  if (!qcListBounds || qcListBounds.height > 300) throw new Error(`QC review list exceeded its compact height: ${qcListBounds?.height ?? "missing"}px.`);
   const wideActionButtons = await page.locator(".summary-head-actions button").all();
   const wideActionTops = await Promise.all(wideActionButtons.map(async (button) => (await button.boundingBox())?.y ?? Number.NaN));
   if (new Set(wideActionTops.map((value) => Math.round(value))).size > 1) throw new Error(`Wide summary actions are not aligned: ${wideActionTops.join(", ")}.`);
