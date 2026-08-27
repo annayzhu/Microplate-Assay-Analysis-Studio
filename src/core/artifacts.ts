@@ -21,7 +21,7 @@ export type ReproducibleArtifact = {
 export type ArtifactRequest =
   | { kind: "project"; plates: ParsedPlate[]; experiment: ExperimentRecord; activeModuleId: AssayModuleId; analysisConfig: AnalysisConfig; sourceName?: string }
   | { kind: "analysis-package"; plate: ParsedPlate; wells: WellRecord[]; analysisConfig: AnalysisConfig; result: CellViabilityAnalysisResult }
-  | { kind: "annotated-wells" | "technical-summary" | "biological-summary"; plate: ParsedPlate; result: CellViabilityAnalysisResult; scope: string }
+  | { kind: "annotated-wells" | "technical-summary" | "biological-summary"; plate: ParsedPlate; result: CellViabilityAnalysisResult; scope: string; analysisConfig?: AnalysisConfig }
   | { kind: "measurements"; plate: ParsedPlate; wells?: WellRecord[]; scope?: string };
 
 type ProjectDocument = {
@@ -71,17 +71,26 @@ function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedP
   })));
 }
 
-function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
+function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): string {
   const comparisonByGroup = new Map(result.significanceComparisons.map((comparison) => [[comparison.group, comparison.treatment, comparison.concentration, comparison.timepoint].join("¦"), comparison]));
-  const headers = ["category", "value", "sd", "sem", "group", "treatment", "concentration", "timepoint", "n_biological", "blank_corrected_mean", "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source"];
+  const headers = [
+    "category", "value", "sd", "sem", "signal_basis", "group", "treatment", "concentration", "timepoint", "n_biological",
+    "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
+    "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
+    "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source",
+  ];
   return rowsToCsv(headers, result.biologicalSummaries.map((row) => {
     const comparison = comparisonByGroup.get([row.group, row.treatment, row.concentration, row.timepoint].join("¦"));
     return {
       category: [row.group, row.concentration, row.timepoint].filter(Boolean).join(" · "),
-      value: row.relativeActivityPercent ?? row.correctedMean, sd: row.relativeSdPercent ?? row.correctedSd,
-      sem: row.relativeSemPercent ?? row.correctedSem, group: row.group, treatment: row.treatment,
+      value: row.correctedMean, sd: row.correctedSd, sem: row.correctedSem, signal_basis: "blank-corrected",
+      group: row.group, treatment: row.treatment,
       concentration: row.concentration, timepoint: row.timepoint, n_biological: row.nBiological,
-      blank_corrected_mean: row.correctedMean, p_value_vs_control: comparison?.pValue ?? "",
+      blank_corrected_mean: row.correctedMean, blank_corrected_sd: row.correctedSd, blank_corrected_sem: row.correctedSem,
+      relative_to_control_percent: row.relativeActivityPercent, relative_to_control_sd_percent: row.relativeSdPercent,
+      relative_to_control_sem_percent: row.relativeSemPercent,
+      normalization_reference: row.relativeActivityPercent === null ? "" : analysisConfig?.controlGroup ?? comparison?.controlGroup ?? "control group",
+      p_value_vs_control: comparison?.pValue ?? "",
       fdr_vs_control: comparison?.adjustedPValue ?? "", significance: comparison?.label ?? "",
       plate_name: plate.metadata.plateName, import_source: plate.metadata.sourceKind,
     };
@@ -157,7 +166,7 @@ export function createArtifact(request: ArtifactRequest): ReproducibleArtifact {
   const suffix = request.kind === "annotated-wells" ? "annotated-wells" : request.kind;
   const content = request.kind === "annotated-wells" ? annotatedWellsCsv(request.result, request.plate)
     : request.kind === "technical-summary" ? technicalSummaryCsv(request.result, request.plate)
-      : biologicalSummaryCsv(request.result, request.plate);
+      : biologicalSummaryCsv(request.result, request.plate, request.analysisConfig);
   return { filename: artifactName(request.plate.metadata.sourceFileName, `${suffix}-${request.scope}.csv`), mimeType: "text/csv", content };
 }
 

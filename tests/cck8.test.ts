@@ -86,10 +86,23 @@ describe("CCK-8 analysis", () => {
     expect(result.significanceComparisons[0].note).toContain("Paired t-test");
     expect(result.findings.filter((finding) => finding.severity === "error")).toEqual([]);
 
-    const summaryCsv = createArtifact({ kind: "biological-summary", plate: fixturePlate(), result, scope: "all" }).content;
-    expect(summaryCsv.split("\n")[0].split(",")).toContain("sd");
-    const drugCsvRow = summaryCsv.split("\n").find((line) => line.includes("Drug"))?.split(",");
-    expect(Number(drugCsvRow?.[2])).toBeCloseTo(5, 12);
+    const summaryCsv = createArtifact({ kind: "biological-summary", plate: fixturePlate(), result, scope: "all", analysisConfig: config }).content;
+    const [headerLine, ...dataLines] = summaryCsv.split("\n");
+    const headers = headerLine.split(",");
+    const drugCsvRow = dataLines.find((line) => line.includes("Drug"))?.split(",");
+    const value = (column: string) => drugCsvRow?.[headers.indexOf(column)];
+
+    expect(headers).toEqual(expect.arrayContaining([
+      "value", "sd", "sem", "signal_basis", "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
+      "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
+    ]));
+    expect(Number(value("value"))).toBeCloseTo(0.1, 12);
+    expect(Number(value("sd"))).toBeCloseTo(0.01, 12);
+    expect(value("signal_basis")).toBe("blank-corrected");
+    expect(Number(value("blank_corrected_mean"))).toBeCloseTo(0.1, 12);
+    expect(Number(value("relative_to_control_percent"))).toBeCloseTo(50, 12);
+    expect(Number(value("relative_to_control_sd_percent"))).toBeCloseTo(5, 12);
+    expect(value("normalization_reference")).toBe("Vehicle");
   });
 
   it("falls back to Welch t-test when biological replicates are not matched", () => {
