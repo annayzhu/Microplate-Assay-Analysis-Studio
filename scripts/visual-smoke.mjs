@@ -103,12 +103,26 @@ try {
   await page.locator(".workspace-nav").getByRole("button", { name: /分析与导出/ }).click();
   if (!dirtyPromptSeen || !await page.getByRole("heading", { name: "板图与实验注释" }).isVisible()) throw new Error("Dirty annotation draft was not protected before navigation.");
   await page.getByRole("button", { name: "清空填写" }).click();
+  const expandedPlateBounds = await page.locator(".plate-panel").boundingBox();
+  await page.getByRole("button", { name: "收起批量注释" }).click();
+  const collapsedPlateBounds = await page.locator(".plate-panel").boundingBox();
+  if (!expandedPlateBounds || !collapsedPlateBounds || collapsedPlateBounds.width <= expandedPlateBounds.width + 150) throw new Error("Collapsing batch annotations did not return meaningful width to the plate.");
+  if (await page.getByLabel("分组 · Group").isVisible()) throw new Error("Collapsed batch annotations left form controls in the visible or keyboard flow.");
+  if (await page.locator(".annotation-collapsed-count").innerText() !== "1") throw new Error("Collapsed batch annotations did not preserve the selected-well count.");
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-annotation-collapsed.png"), fullPage: true });
+  await page.getByRole("button", { name: "展开批量注释" }).click();
+  if (!await page.getByLabel("分组 · Group").isVisible()) throw new Error("Batch annotations did not restore after expansion.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-manual-layout.png"), fullPage: true });
   await page.setViewportSize({ width: 980, height: 1000 });
   const compactPlate = await page.locator(".plate-panel").boundingBox();
   const compactAnnotation = await page.locator(".annotation-panel").boundingBox();
   if (!compactPlate || !compactAnnotation || compactAnnotation.y <= compactPlate.y) throw new Error("Narrow layout did not move the annotation panel below the plate.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-narrow.png"), fullPage: true });
+  await page.getByRole("button", { name: "收起批量注释" }).click();
+  const compactCollapsedAnnotation = await page.locator(".annotation-panel").boundingBox();
+  if (!compactCollapsedAnnotation || compactCollapsedAnnotation.height > 100) throw new Error("Narrow collapsed annotation panel did not become a compact horizontal bar.");
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-narrow-collapsed.png"), fullPage: true });
+  await page.getByRole("button", { name: "展开批量注释" }).click();
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
@@ -135,12 +149,14 @@ try {
   if (!layoutPath || !layoutDownload.suggestedFilename().includes("reusable-layout.csv")) throw new Error("Reusable plate-layout export was not produced.");
   await page.locator('input[type="file"][accept=".csv,.tsv,.txt"]').setInputFiles(layoutPath);
   await page.getByRole("heading", { name: "板布局导入预览" }).waitFor();
+  const layoutPreviewBounds = await page.getByLabel("板布局导入预览").boundingBox();
+  if (!layoutPreviewBounds || layoutPreviewBounds.height > 260) throw new Error(`Reusable layout preview is still too tall: ${layoutPreviewBounds?.height ?? "missing"}px.`);
   const layoutPreviewText = await page.getByLabel("板布局导入预览").innerText();
-  for (const signal of ["96", "成功匹配孔", "来源板型", "8 × 12", "新检测的原始读数始终保持不变"]) {
+  for (const signal of ["96", "成功匹配孔", "来源板型", "8 × 12", "新检测的原始读数保持不变"]) {
     if (!layoutPreviewText.includes(signal)) throw new Error(`Reusable layout preview is missing expected signal: ${signal}`);
   }
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout-import-preview.png"), fullPage: true });
-  await page.getByText("清空后为本次独立实验重新填写", { exact: false }).click();
+  await page.getByText("清空并重新填写", { exact: true }).click();
   await page.getByRole("button", { name: "应用到当前板的 96 个孔" }).click();
   if (await page.locator('[data-well="H12"] strong').innerText() !== rawValueBeforeLayoutRoundTrip) throw new Error("Layout import changed the displayed raw reading.");
   const restoredLayoutDetail = await page.locator(".well-detail").innerText();
