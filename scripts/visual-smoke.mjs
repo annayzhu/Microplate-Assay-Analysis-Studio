@@ -127,7 +127,7 @@ try {
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
-  if (!manualAnalysisText.includes("主值始终为未归一化的 blank-corrected signal")) throw new Error("Analysis UI did not explain the unnormalized export basis.");
+  if (!manualAnalysisText.includes("只保留语义明确的 blank_corrected_* 基础列")) throw new Error("Analysis UI did not explain the explicit export schema.");
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   const projectDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "保存可复现项目" }).click();

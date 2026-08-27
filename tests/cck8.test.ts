@@ -93,13 +93,15 @@ describe("CCK-8 analysis", () => {
     const value = (column: string) => drugCsvRow?.[headers.indexOf(column)];
 
     expect(headers).toEqual(expect.arrayContaining([
-      "value", "sd", "sem", "signal_basis", "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
+      "signal_basis", "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
       "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
     ]));
-    expect(Number(value("value"))).toBeCloseTo(0.1, 12);
-    expect(Number(value("sd"))).toBeCloseTo(0.01, 12);
+    expect(headers).not.toContain("value");
+    expect(headers).not.toContain("sd");
+    expect(headers).not.toContain("sem");
     expect(value("signal_basis")).toBe("blank-corrected");
     expect(Number(value("blank_corrected_mean"))).toBeCloseTo(0.1, 12);
+    expect(Number(value("blank_corrected_sd"))).toBeCloseTo(0.01, 12);
     expect(Number(value("relative_to_control_percent"))).toBeCloseTo(50, 12);
     expect(Number(value("relative_to_control_sd_percent"))).toBeCloseTo(5, 12);
     expect(value("normalization_reference")).toBe("Vehicle");

@@ -781,7 +781,7 @@ export default function App() {
 
           <section className="panel table-panel summary-panel">
             <div className="panel-head summary-panel-head">
-              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 汇总 CSV 的主值始终为未归一化的 blank-corrected signal；Rel. % 仅作为相对 Control 的派生列。</p></div>
+              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 汇总 CSV 只保留语义明确的 blank_corrected_* 基础列；relative_to_control_* 仅表示相对 Control 的派生结果。</p></div>
               <div className="summary-head-actions">
                 {selectedSummaryKeys.size ? <button type="button" className="secondary-button mini" onClick={() => setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "clear-summary-selection" }) : current)}>显示全部</button> : null}
                 <button type="button" className="secondary-button mini" disabled={!displayedAnnotatedWells.length} onClick={() => exportFiles("wells")}>孔级 CSV</button>
