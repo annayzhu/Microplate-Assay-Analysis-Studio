@@ -18,7 +18,7 @@ try {
   });
   await page.getByLabel("粘贴孔板读数").fill(["离线验证板", header, ...rows].join("\n"));
   await page.getByRole("button", { name: "解析并预览" }).click();
-  await page.getByRole("heading", { name: "导入预览" }).waitFor();
+  await page.getByRole("heading", { name: "确认导入" }).waitFor();
   await page.getByRole("button", { name: "确认载入 1 块板" }).click();
   const visibleText = await page.locator("body").innerText();
   assertSignals(visibleText, ["离线验证板", "96 个已测孔", "用户已填写", "人工录入"], "Fresh offline package");

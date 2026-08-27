@@ -57,7 +57,7 @@ try {
   if (process.env.CCK8_XLS) {
     await page.getByRole("button", { name: /蛋白定量/ }).click();
     await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(process.env.CCK8_XLS);
-    await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+    await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const mismatchPreview = await page.locator(".import-preview").innerText();
     if (!mismatchPreview.includes("选择与识别不一致")) throw new Error("Assay mismatch was not made visible in import preview.");
     const mismatchLoadButton = page.getByRole("button", { name: "确认载入 1 块板" });
@@ -80,12 +80,19 @@ try {
   await page.getByRole("tab", { name: "粘贴孔板读数" }).click();
   await page.getByLabel("粘贴孔板读数").fill(`${manualPlateMatrix("培养板 1", 0.4)}\n\n${manualPlateMatrix("培养板 2", 0.8)}`);
   await page.getByRole("button", { name: "解析并预览" }).click();
-  await page.getByRole("heading", { name: "导入预览" }).waitFor();
+  await page.getByRole("heading", { name: "确认导入" }).waitFor();
   const previewText = await page.locator("body").innerText();
   for (const signal of ["识别到 2 块独立孔板", "培养板 1", "培养板 2", "96 个已测孔"]) {
     if (!previewText.includes(signal)) throw new Error(`Manual-paste preview is missing expected signal: ${signal}`);
   }
+  const compactPreviewBounds = await page.locator(".import-preview").boundingBox();
+  if (!compactPreviewBounds || compactPreviewBounds.height > 330) throw new Error(`Import preview is still too tall: ${compactPreviewBounds?.height ?? "missing"}px.`);
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-manual-preview.png"), fullPage: true });
+  await page.setViewportSize({ width: 980, height: 1000 });
+  const previewOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (previewOverflow > 1) throw new Error(`Import preview has ${previewOverflow}px of page-level horizontal overflow.`);
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-manual-preview-narrow.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByRole("button", { name: "确认载入 2 块板" }).click();
   await page.getByText("本次导入包含 2 块板", { exact: false }).waitFor();
   await page.getByRole("button", { name: "2. 培养板 2" }).click();
@@ -161,7 +168,7 @@ try {
   const projectPath = await projectDownload.path();
   if (!projectPath || !projectDownload.suggestedFilename().includes("reproducible-project.json")) throw new Error("Reproducible project export was not produced.");
   await page.locator('input[type="file"][accept=".json"]').setInputFiles(projectPath);
-  await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+  await page.getByRole("heading", { name: "确认导入" }).waitFor();
   if (!(await page.locator(".import-preview").innerText()).includes("可复现项目")) throw new Error("Project file did not re-enter the shared preview seam.");
   await page.getByRole("button", { name: "确认载入 2 块板" }).click();
   await page.getByRole("button", { name: "2. 培养板 2" }).click();
@@ -200,7 +207,7 @@ try {
   let incompleteLayoutGateVisible = false;
   if (process.env.CCK8_XLS) {
     await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(process.env.CCK8_XLS);
-    await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+    await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const fixturePreview = await page.locator(".import-preview").innerText();
     if (!fixturePreview.includes("系统识别") || !fixturePreview.includes("细胞活性 / 细胞增殖")) throw new Error("Instrument import did not pass through assay review preview.");
     await page.getByRole("button", { name: "确认载入 1 块板" }).click();
@@ -225,7 +232,7 @@ try {
   if (process.env.DUAL_LUC_XLS) {
     await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
     await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(process.env.DUAL_LUC_XLS);
-    await page.getByRole("heading", { name: /导入预览与实验类型确认/ }).waitFor();
+    await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const dualPreview = await page.locator(".import-preview").innerText();
     if (!dualPreview.includes("单 / 双荧光素酶")) throw new Error("Dual-Luciferase was not routed through the Luciferase module preview.");
     await page.getByRole("button", { name: "确认载入 1 块板" }).click();

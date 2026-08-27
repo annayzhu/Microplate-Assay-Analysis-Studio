@@ -618,6 +618,25 @@ export default function App() {
           </>}
         </div>}
 
+        {pendingBatch ? <div className="import-preview" aria-label="导入预览">
+          <div className="import-preview-head"><div><h3>确认导入</h3><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : pendingBatch.sourceKind === "reading-template" ? "读数模板" : pendingBatch.sourceKind === "project-file" ? "可复现项目" : "仪器文件"}</span></div><p>识别到 {pendingBatch.plates.length} 块独立孔板 · 确认后替换当前工作区</p></div>
+          <div className="preview-plate-list">{pendingBatch.plates.map((item, index) => {
+            const detected = detectedAssayModule(item);
+            const chosen = pendingModuleIds[index] ?? "unknown";
+            const mismatch = pendingBatch.sourceKind === "instrument-file" && detected !== "unknown" && chosen !== detected;
+            return <div key={`${item.metadata.plateName}-${index}`} className={`${pendingIncludedPlates.has(index) ? "included" : "excluded"} ${mismatch ? "module-mismatch" : ""}`}>
+              <label className="preview-include"><input type="checkbox" aria-label={`载入 ${item.metadata.plateName}`} checked={pendingIncludedPlates.has(index)} onChange={(event) => setPendingIncludedPlates((current) => { const next = new Set(current); if (event.target.checked) next.add(index); else next.delete(index); return next; })} /></label>
+              <div className="preview-plate-summary"><strong>{item.metadata.plateName}</strong><span>{item.rows} × {item.columns} · {item.wells.length} 个已测孔</span><small>{item.warnings[0] || "结构检查通过"}</small></div>
+              <div className="module-review"><small>系统识别</small><strong>{detected === "unknown" ? "未可靠识别" : getAssayWorkflow(detected).name}</strong></div>
+              <label className="module-confirm"><span>载入到</span><select value={chosen} onChange={(event) => { const next = [...pendingModuleIds]; next[index] = event.target.value as AssayModuleId; setPendingModuleIds(next); setPendingConflictConfirmed(false); }}>{assayModules.filter((module) => module.status !== "planned").map((module) => <option key={module.id} value={module.id}>{module.name} · {assayStatusLabel(module.status)}</option>)}<option value="unknown">通用酶标数据预览</option></select></label>
+              {mismatch ? <b className="mismatch-badge">选择与识别不一致</b> : null}
+            </div>;
+          })}</div>
+          {pendingBatch.warnings.length ? <ul className="preview-warnings">{pendingBatch.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul> : null}
+          {pendingHasConflict ? <label className="conflict-confirm"><input type="checkbox" checked={pendingConflictConfirmed} onChange={(event) => setPendingConflictConfirmed(event.target.checked)} />我已核对实验记录，确认按“载入到”所选模块继续；系统识别结果会保留在溯源信息中。</label> : null}
+          <div className="manual-import-actions"><button type="button" className="secondary-button" onClick={() => setPendingBatch(null)}>取消</button><button type="button" className="primary-button" disabled={!pendingIncludedPlates.size || (pendingHasConflict && !pendingConflictConfirmed)} onClick={() => loadBatch(pendingBatch)}>确认载入 {pendingIncludedPlates.size} 块板</button></div>
+        </div> : null}
+
         <AssayWorkflowPanel variant="disclosure" module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
         <details className="experiment-record" open={Boolean(experiment.name || experiment.operator || experiment.date || experiment.notes)}>
           <summary>实验记录信息 <small>随可复现项目和溯源导出保存</small></summary>
@@ -628,25 +647,6 @@ export default function App() {
             <Field label="项目备注"><input value={experiment.notes} onChange={(event) => updateExperiment({ notes: event.target.value })} /></Field>
           </div>
         </details>
-
-        {pendingBatch ? <div className="import-preview" aria-label="导入预览">
-          <div className="import-preview-head"><div><h3>导入预览与实验类型确认</h3><p>识别到 {pendingBatch.plates.length} 块独立孔板；确认后才会替换当前工作区。</p></div><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : pendingBatch.sourceKind === "reading-template" ? "读数模板" : pendingBatch.sourceKind === "project-file" ? "可复现项目" : "仪器文件"}</span></div>
-          <div className="preview-plate-list">{pendingBatch.plates.map((item, index) => {
-            const detected = detectedAssayModule(item);
-            const chosen = pendingModuleIds[index] ?? "unknown";
-            const mismatch = pendingBatch.sourceKind === "instrument-file" && detected !== "unknown" && chosen !== detected;
-            return <div key={`${item.metadata.plateName}-${index}`} className={`${pendingIncludedPlates.has(index) ? "included" : "excluded"} ${mismatch ? "module-mismatch" : ""}`}>
-              <label className="preview-include"><input type="checkbox" checked={pendingIncludedPlates.has(index)} onChange={(event) => setPendingIncludedPlates((current) => { const next = new Set(current); if (event.target.checked) next.add(index); else next.delete(index); return next; })} /><span>载入</span></label>
-              <div><strong>{item.metadata.plateName}</strong><span>{item.rows} × {item.columns} · {item.wells.length} 个已测孔</span><small>{item.warnings[0] || "结构检查通过"}</small></div>
-              <div className="module-review"><small>系统识别</small><strong>{detected === "unknown" ? "未可靠识别" : getAssayWorkflow(detected).name}</strong></div>
-              <label className="module-confirm"><span>载入到</span><select value={chosen} onChange={(event) => { const next = [...pendingModuleIds]; next[index] = event.target.value as AssayModuleId; setPendingModuleIds(next); setPendingConflictConfirmed(false); }}>{assayModules.filter((module) => module.status !== "planned").map((module) => <option key={module.id} value={module.id}>{module.name} · {assayStatusLabel(module.status)}</option>)}<option value="unknown">通用酶标数据预览</option></select></label>
-              {mismatch ? <b className="mismatch-badge">选择与识别不一致</b> : null}
-            </div>;
-          })}</div>
-          {pendingBatch.warnings.length ? <ul className="preview-warnings">{pendingBatch.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul> : null}
-          {pendingHasConflict ? <label className="conflict-confirm"><input type="checkbox" checked={pendingConflictConfirmed} onChange={(event) => setPendingConflictConfirmed(event.target.checked)} />我已核对实验记录，确认按“载入到”所选模块继续；系统识别结果会保留在溯源信息中。</label> : null}
-          <div className="manual-import-actions"><button type="button" className="secondary-button" onClick={() => setPendingBatch(null)}>取消</button><button type="button" className="primary-button" disabled={!pendingIncludedPlates.size || (pendingHasConflict && !pendingConflictConfirmed)} onClick={() => loadBatch(pendingBatch)}>确认载入 {pendingIncludedPlates.size} 块板</button></div>
-        </div> : null}
 
         {plates.length > 1 ? <div className="plate-switcher"><div><strong>本次导入包含 {plates.length} 块板</strong><small>各板注释与分析相互独立，不会自动合并为生物学重复。</small></div><div className="plate-switcher-buttons">{plates.map((item, index) => <button type="button" key={`${item.metadata.plateName}-${index}`} className={index === activePlateIndex ? "active" : ""} onClick={() => selectActivePlate(index)}>{index + 1}. {item.metadata.plateName}</button>)}</div><label>当前板名称<input value={plate?.metadata.plateName ?? ""} onChange={(event) => renameActivePlate(event.target.value)} /></label></div> : null}
         {plate ? <div className="experiment-overview">
