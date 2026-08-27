@@ -145,6 +145,12 @@ function significanceMethodLabel(note: string): string {
   return "n/a";
 }
 
+function AnnotationPanelToggleIcon({ collapsed }: { collapsed: boolean }) {
+  return <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+    <path d={collapsed ? "M12.5 4.5 7 10l5.5 5.5" : "M7.5 4.5 13 10l-5.5 5.5"} />
+  </svg>;
+}
+
 function templateIdForPlate(plate: ParsedPlate): string {
   return plateTemplateDefinitions.find((template) => template.rows === plate.rows && template.columns === plate.columns)?.id ?? defaultLayoutTemplateId;
 }
@@ -176,6 +182,7 @@ export default function App() {
   const [pendingLayoutFile, setPendingLayoutFile] = useState<{ name: string; text: string } | null>(null);
   const [layoutBiologicalMode, setLayoutBiologicalMode] = useState<"preserve" | "clear">("preserve");
   const [layoutMismatchConfirmed, setLayoutMismatchConfirmed] = useState(false);
+  const [annotationPanelCollapsed, setAnnotationPanelCollapsed] = useState(false);
   const [batchDraft, setBatchDraft] = useState<BatchDraft>(emptyBatchDraft);
   const [draftStatus, setDraftStatus] = useState<DraftStatus>("idle");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -675,29 +682,29 @@ export default function App() {
         </div>
         {layoutImportPreview && pendingLayoutFile ? <section className="layout-import-preview" aria-label="板布局导入预览">
           <div className="layout-import-preview-head">
-            <div><p className="eyebrow">LAYOUT PREVIEW</p><h3>板布局导入预览</h3><p>{pendingLayoutFile.name}{layoutImportPreview.metadata.plateName ? ` · 来源板：${layoutImportPreview.metadata.plateName}` : ""}</p></div>
+            <div><h3>板布局导入预览</h3><p title={pendingLayoutFile.name}>{pendingLayoutFile.name}{layoutImportPreview.metadata.plateName ? ` · 来源板：${layoutImportPreview.metadata.plateName}` : ""}</p></div>
+            <dl className="layout-preview-metrics">
+              <div className="primary"><dt>成功匹配孔</dt><dd>{layoutImportPreview.matched}</dd></div>
+              <div><dt>文件孔位</dt><dd>{layoutImportPreview.sourceWellCount}</dd></div>
+              <div><dt>超出当前板</dt><dd>{layoutImportPreview.outOfPlateWells.length}</dd></div>
+              <div><dt>来源板型</dt><dd>{layoutImportPreview.metadata.plateRows && layoutImportPreview.metadata.plateColumns ? `${layoutImportPreview.metadata.plateRows} × ${layoutImportPreview.metadata.plateColumns}` : "未声明"}</dd></div>
+            </dl>
             <button type="button" className="secondary-button mini" onClick={() => setPendingLayoutFile(null)}>取消</button>
           </div>
-          <div className="layout-preview-metrics">
-            <div><strong>{layoutImportPreview.matched}</strong><span>成功匹配孔</span></div>
-            <div><strong>{layoutImportPreview.sourceWellCount}</strong><span>文件孔位</span></div>
-            <div><strong>{layoutImportPreview.outOfPlateWells.length}</strong><span>超出当前板</span></div>
-            <div><strong>{layoutImportPreview.metadata.plateRows && layoutImportPreview.metadata.plateColumns ? `${layoutImportPreview.metadata.plateRows} × ${layoutImportPreview.metadata.plateColumns}` : "未声明"}</strong><span>来源板型</span></div>
-          </div>
           <div className="layout-preview-details">
-            <div><strong>将更新的注释字段</strong><p>{layoutImportPreview.affectedFields.map((field) => layoutFieldLabels[field]).join("、") || "未识别到可更新字段"}</p></div>
+            <div className="layout-preview-fields"><strong>将更新的注释字段</strong><p>{layoutImportPreview.affectedFields.map((field) => layoutFieldLabels[field]).join("、") || "未识别到可更新字段"}</p></div>
             <fieldset>
               <legend>生物学重复</legend>
-              <label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "preserve"} onChange={() => setLayoutBiologicalMode("preserve")} />沿用布局文件中的编号</label>
-              <label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "clear"} onChange={() => setLayoutBiologicalMode("clear")} />清空后为本次独立实验重新填写</label>
-              <p>技术重复的孔位关系会继续沿用；新检测的原始读数始终保持不变。</p>
+              <div><label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "preserve"} onChange={() => setLayoutBiologicalMode("preserve")} />沿用布局编号</label>
+                <label><input type="radio" name="layout-biological-mode" checked={layoutBiologicalMode === "clear"} onChange={() => setLayoutBiologicalMode("clear")} />清空并重新填写</label></div>
+              <p>技术重复关系继续沿用；新检测的原始读数保持不变。</p>
             </fieldset>
+            <button type="button" className="primary-button layout-preview-apply" disabled={!layoutImportPreview.matched || (layoutImportPreview.plateShapeMismatch && !layoutMismatchConfirmed)} onClick={applyPendingLayout}>应用到当前板的 {layoutImportPreview.matched} 个孔</button>
           </div>
-          {layoutImportPreview.warnings.length ? <ul className="layout-preview-warnings">{layoutImportPreview.warnings.slice(0, 8).map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+          {layoutImportPreview.warnings.length ? <details className="layout-preview-warnings"><summary>查看 {layoutImportPreview.warnings.length} 条导入提示</summary><ul>{layoutImportPreview.warnings.slice(0, 8).map((warning) => <li key={warning}>{warning}</li>)}</ul></details> : null}
           {layoutImportPreview.plateShapeMismatch ? <label className="check-row layout-mismatch-confirm"><input type="checkbox" checked={layoutMismatchConfirmed} onChange={(event) => setLayoutMismatchConfirmed(event.target.checked)} />我已核对不同板型，只将地址一致的孔位注释应用到当前板</label> : null}
-          <div className="layout-preview-actions"><button type="button" className="primary-button" disabled={!layoutImportPreview.matched || (layoutImportPreview.plateShapeMismatch && !layoutMismatchConfirmed)} onClick={applyPendingLayout}>应用到当前板的 {layoutImportPreview.matched} 个孔</button></div>
         </section> : null}
-        <div className="layout-grid">
+        <div className={`layout-grid${annotationPanelCollapsed ? " annotation-collapsed" : ""}`}>
           <div className="panel plate-panel">
             <div className="panel-head plate-panel-head">
               <div><h3>{plate.rows * plate.columns}孔板 · {plate.wells.length}个已测孔</h3><p>拖动框选；Ctrl / Command 追加框选或逐孔增减；Shift 点选头尾矩形区域。</p></div>
@@ -706,9 +713,16 @@ export default function App() {
             <PlateMap wells={wells} selected={selected} selectionAnchor={selectionAnchor} onSelectionChange={updatePlateSelection} plateRows={plate.rows} plateColumns={plate.columns} signalLabel={rawSignalLabel(plate)} zoom={plateZoom} autoFitEnabled={!platePresentation.zoomManuallyChanged} onAutoFit={(nextZoom) => setPlateZoom(nextZoom, false)} />
             <div className="plate-legend"><span className="unassigned">未指定 {roleCounts.unassigned}</span><span className="sample">样本 {roleCounts.sample}</span><span className="control">对照 {roleCounts.control}</span><span className="standard">标准品 {roleCounts.standard}</span><span className="qc">质控 {roleCounts.qc}</span><span className="blank">空白 {roleCounts.blank}</span><span>颜色深浅表示原始读数，不表示分组。</span></div>
           </div>
-          <aside className="panel annotation-panel">
-            <div className="panel-head annotation-panel-head"><div><h3>批量注释</h3><p>{selected.size ? `填写内容将应用到 ${selected.size} 个孔；留空字段保持原值。` : "先在板图中选择一个或多个孔。"}</p></div>{draftStatus !== "idle" ? <span className={`draft-badge ${draftStatus}`}>{draftStatus === "dirty" ? "尚未应用" : "已应用"}</span> : null}</div>
-            <div className="annotation-panel-body">
+          <aside className={`panel annotation-panel${annotationPanelCollapsed ? " collapsed" : ""}`}>
+            <div className="panel-head annotation-panel-head">
+              <div className="annotation-panel-title"><h3>批量注释</h3><p>{selected.size ? `填写内容将应用到 ${selected.size} 个孔；留空字段保持原值。` : "先在板图中选择一个或多个孔。"}</p></div>
+              <div className="annotation-panel-head-actions">
+                {annotationPanelCollapsed && selected.size ? <span className="annotation-collapsed-count" title={`${selected.size} 个孔已选`}>{selected.size}</span> : null}
+                {draftStatus !== "idle" ? <span className={`draft-badge ${draftStatus}`}>{draftStatus === "dirty" ? "尚未应用" : "已应用"}</span> : null}
+                <button type="button" className="annotation-panel-toggle" aria-expanded={!annotationPanelCollapsed} aria-controls="annotation-panel-content" aria-label={annotationPanelCollapsed ? "展开批量注释" : "收起批量注释"} onClick={() => setAnnotationPanelCollapsed((current) => !current)}><AnnotationPanelToggleIcon collapsed={annotationPanelCollapsed} /></button>
+              </div>
+            </div>
+            {!annotationPanelCollapsed ? <div className="annotation-panel-body" id="annotation-panel-content">
               <div className="well-detail">
                 {selectedSingleWell ? <>
                   <div className="well-detail-title"><strong>{selectedSingleWell.well}</strong><span>{selectedSingleWell.excluded ? "排除分析" : "纳入分析"}</span></div>
@@ -730,8 +744,8 @@ export default function App() {
                 <Field label="排除状态"><select value={batchDraft.excluded} onChange={(event) => changeBatchDraft({ excluded: event.target.value as BatchDraft["excluded"] })}><option value="false">纳入分析</option><option value="true">排除分析</option></select>{selectedExclusionState === "mixed" ? <small className="field-help">所选孔状态不一致；应用后会统一为当前选择。</small> : null}</Field>
               </div>
               {!blankAnnotationMode ? <details className="advanced-fields" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}><summary>更多实验信息{advancedFilledCount ? <span>{advancedFilledCount} 项已填写</span> : null}</summary><div className="form-grid"><Field label="处理"><input value={batchDraft.treatment} onChange={(event) => changeBatchDraft({ treatment: event.target.value })} placeholder="siRNA / Drug" /></Field><Field label="浓度"><input value={batchDraft.concentration} onChange={(event) => changeBatchDraft({ concentration: event.target.value })} placeholder="10 nM" /></Field><Field label="时间点"><input value={batchDraft.timepoint} onChange={(event) => changeBatchDraft({ timepoint: event.target.value })} placeholder="Day0 / 24 h" /></Field><Field label="技术重复"><input value={batchDraft.technicalReplicate} onChange={(event) => changeBatchDraft({ technicalReplicate: event.target.value })} placeholder="通常留空" /><small className="field-help">通常由下方选项按当前顺序自动编号。</small></Field><Field label="备注"><input value={batchDraft.notes} onChange={(event) => changeBatchDraft({ notes: event.target.value })} /></Field></div><label className="check-row"><input type="checkbox" checked={autoNumberTechnical} onChange={(event) => { setAutoNumberTechnical(event.target.checked); setDraftStatus("dirty"); }} />按当前选择顺序自动编号技术重复 T1…Tn</label></details> : <p className="blank-form-note">空白孔只参与背景扣除；通常只需确认角色与纳入/排除状态。</p>}
-            </div>
-            <div className="annotation-panel-footer"><button type="button" className="secondary-button" disabled={draftStatus === "idle"} onClick={clearBatchDraft}>清空填写</button><button type="button" className="primary-button" disabled={!selected.size} onClick={applyBatch}>应用到所选 {selected.size} 个孔</button></div>
+            </div> : null}
+            {!annotationPanelCollapsed ? <div className="annotation-panel-footer"><button type="button" className="secondary-button" disabled={draftStatus === "idle"} onClick={clearBatchDraft}>清空填写</button><button type="button" className="primary-button" disabled={!selected.size} onClick={applyBatch}>应用到所选 {selected.size} 个孔</button></div> : null}
           </aside>
         </div>
         <div className="next-step"><div><strong>{activeModuleId === "cell-viability" ? (analysis.findings.some((finding) => finding.code === "LAYOUT_INCOMPLETE" || finding.code === "ROLE_UNASSIGNED") ? "板图尚未完成" : "板图具备基础分析条件") : "孔位身份可继续补充"}</strong><p>{activeModuleId === "cell-viability" ? "只有孔角色、分组和生物学重复齐全后，结果才会进入正式汇总。" : `${activeModule.name} 当前提供数据与仪器结果预览；未补齐的字段会保留为待确认，不会触发未经验证的计算。`}</p></div><button type="button" className="primary-button" onClick={() => navigateTo("analysis")}>进入分析</button></div>
