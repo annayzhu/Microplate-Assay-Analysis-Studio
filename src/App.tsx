@@ -774,9 +774,9 @@ export default function App() {
               <Field label="技术复孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.technicalCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ technicalCvThresholdPercent: Number(event.target.value) })} /></Field>
               <Field label="空白孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.blankCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ blankCvThresholdPercent: Number(event.target.value) })} /></Field>
             </div>
-            <div className="qc-compact-block">
-              <div className="side-section-title"><strong>质量控制</strong><span>{analysis.findings.length} 条</span></div>
-              {analysis.findings.length ? <ul className="qc-mini-list">{analysis.findings.map((finding, index) => <li key={`${finding.code}-${index}`} className={finding.severity} onClick={() => finding.wells.length && updatePlateSelection(new Set(finding.wells), finding.wells.at(-1) ?? null)}><span>{finding.severity}</span><div><strong>{finding.code}</strong><p>{finding.message}</p>{finding.wells.length ? <small>{finding.wells.slice(0, 8).join(", ")}{finding.wells.length > 8 ? "…" : ""}</small> : null}</div></li>)}</ul> : <div className="empty-state compact">没有发现需要复核的问题。</div>}
+            <div className={`qc-compact-block ${analysis.findings.length ? "has-findings" : "clear"}`}>
+              <div className="side-section-title"><strong>质量控制</strong><span>{analysis.findings.length ? `${analysis.findings.length} 条` : "无需复核"}</span></div>
+              {analysis.findings.length ? <ul className="qc-mini-list">{analysis.findings.map((finding, index) => <li key={`${finding.code}-${index}`} className={finding.severity} onClick={() => finding.wells.length && updatePlateSelection(new Set(finding.wells), finding.wells.at(-1) ?? null)}><span>{finding.severity}</span><div><strong>{finding.code}</strong><p title={finding.message}>{finding.message}</p>{finding.wells.length ? <small title={finding.wells.join(", ")}>{finding.wells.slice(0, 8).join(", ")}{finding.wells.length > 8 ? "…" : ""}</small> : null}</div></li>)}</ul> : null}
             </div>
           </aside>
 
