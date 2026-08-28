@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { assertSignals, dragBetweenWells, manualPlateMatrix, openAcceptanceBrowser } from "./acceptance-harness.mjs";
 
 const screenshotDir = process.argv[2];
@@ -48,7 +48,7 @@ function normalizationPlate(name, timepoint, blank, values) {
 const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
 await writeFile(normalizationProjectPath, JSON.stringify({
   schemaVersion: 3,
-  tool: { id: "microplate-assay-studio", version: "0.6.1" },
+  tool: { id: "microplate-assay-studio", version: "0.6.2" },
   generatedAt: new Date(0).toISOString(),
   experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
   activeModuleId: "cell-viability",
@@ -161,7 +161,7 @@ try {
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-manual-preview-narrow.png"), fullPage: true });
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.getByRole("button", { name: "确认载入 2 块板" }).click();
-  await page.getByText("本次导入包含 2 块板", { exact: false }).waitFor();
+  await page.getByText("当前项目包含 2 块板", { exact: false }).waitFor();
   await page.getByRole("button", { name: "2. 培养板 2" }).click();
   const manualImportText = await page.locator("body").innerText();
   for (const signal of ["用户已填写", "人工录入", "450 nm", "96 个已测孔"]) {
@@ -307,14 +307,19 @@ try {
   let requiredImportSignals = [];
   let requiredLayoutSignals = [];
   let incompleteLayoutGateVisible = false;
+  let multiFileAppendValidated = false;
   if (process.env.CCK8_XLS) {
-    await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(process.env.CCK8_XLS);
+    const copiedCck8Path = resolve(screenshotDir, "cck8-day-1-copy.xlsx");
+    await writeFile(copiedCck8Path, await readFile(process.env.CCK8_XLS));
+    await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles([process.env.CCK8_XLS, copiedCck8Path]);
     await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const fixturePreview = await page.locator(".import-preview").innerText();
     if (!fixturePreview.includes("系统识别") || !fixturePreview.includes("细胞活性 / 细胞增殖")) throw new Error("Instrument import did not pass through assay review preview.");
-    await page.getByRole("button", { name: "确认载入 1 块板" }).click();
+    if (!fixturePreview.includes("识别到 2 块独立孔板") || !fixturePreview.includes("将追加到当前项目")) throw new Error("Multiple instrument files were not combined into an appendable plate batch.");
+    await page.getByText("替换当前项目", { exact: true }).click();
+    await page.getByRole("button", { name: "确认载入 2 块板" }).click();
     const importedText = await page.locator("body").innerText();
-    requiredImportSignals = ["本次实验基本信息", "CCK-8 / WST-8", "吸光", "450 nm", "96 个已测孔"];
+    requiredImportSignals = ["当前项目包含 2 块板", "本次实验基本信息", "CCK-8 / WST-8", "吸光", "450 nm", "96 个已测孔"];
     assertSignals(importedText, requiredImportSignals, "Instrument import");
     const reviewButton = page.getByRole("button", { name: "核对实验方法" });
     if (!await reviewButton.isVisible()) throw new Error("Inferred assay method does not expose a review action.");
@@ -327,6 +332,14 @@ try {
     for (const signal of ["CCK-8 / WST-8 · 人工确认", "原始识别：CCK-8 / WST-8"]) {
       if (!reviewedOverview.includes(signal)) throw new Error(`Reviewed assay provenance is missing: ${signal}`);
     }
+    await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(copiedCck8Path);
+    await page.getByRole("heading", { name: "确认导入" }).waitFor();
+    const appendPreview = await page.locator(".import-preview").innerText();
+    if (!appendPreview.includes("将追加到当前项目") || !appendPreview.includes("保留现有板、注释与分析设置")) throw new Error("Existing project did not default to append mode.");
+    await page.getByRole("button", { name: "确认追加 1 块板" }).click();
+    if (!(await page.locator("body").innerText()).includes("当前项目包含 3 块板")) throw new Error("Appended instrument plate was not added to the current project.");
+    multiFileAppendValidated = true;
+    await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-multifile-append.png"), fullPage: true });
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-imported.png"), fullPage: true });
     await page.getByRole("button", { name: "进入板图与注释" }).click();
     const layoutText = await page.locator("body").innerText();
@@ -348,6 +361,7 @@ try {
     await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const dualPreview = await page.locator(".import-preview").innerText();
     if (!dualPreview.includes("单 / 双荧光素酶")) throw new Error("Dual-Luciferase was not routed through the Luciferase module preview.");
+    await page.getByText("替换当前项目", { exact: true }).click();
     await page.getByRole("button", { name: "确认载入 1 块板" }).click();
     await page.getByText("Dual-Luciferase Reporter Assay", { exact: true }).first().waitFor();
     await page.getByRole("button", { name: "进入板图与注释" }).click();
@@ -419,6 +433,7 @@ try {
     incompleteLayoutGateVisible,
     manualUnassignedGateVisible: manualAnalysisText.includes("ROLE_UNASSIGNED"),
     baselineNormalizationRoundTrip: true,
+    multiFileAppendValidated,
     genericLuxSignals,
     optionalVendorScenarios: { cck8: Boolean(process.env.CCK8_XLS), dualLuciferase: Boolean(process.env.DUAL_LUC_XLS), victor: Boolean(process.env.VICTOR_XLS) },
     consoleErrors,

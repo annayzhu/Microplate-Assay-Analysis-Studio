@@ -33,3 +33,15 @@ export async function importPlateReadings(request: PlateReadingImportRequest): P
     warnings: plate.warnings,
   };
 }
+
+export async function importInstrumentFiles(files: readonly BinaryFileSource[]): Promise<PlateImportBatch> {
+  if (!files.length) throw new Error("请至少选择一个仪器导出文件。");
+  const batches = await Promise.all(files.map((file) => importPlateReadings({ kind: "instrument-file", file })));
+  return {
+    id: `instrument-files-${Date.now()}`,
+    sourceKind: "instrument-file",
+    sourceName: files.map((file) => file.name).join("; "),
+    plates: batches.flatMap((batch) => batch.plates),
+    warnings: batches.flatMap((batch) => batch.warnings.map((warning) => `${batch.sourceName}: ${warning}`)),
+  };
+}

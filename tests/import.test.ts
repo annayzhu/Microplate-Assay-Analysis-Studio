@@ -1,6 +1,6 @@
 import XLSX from "xlsx-js-style";
 import { describe, expect, it } from "vitest";
-import { importPlateReadings, type BinaryFileSource } from "../src/core/import";
+import { importInstrumentFiles, importPlateReadings, type BinaryFileSource } from "../src/core/import";
 import { InstrumentImportError } from "../src/core/instruments/registry";
 
 function binarySource(name: string, bytes: ArrayBuffer): BinaryFileSource {
@@ -43,5 +43,16 @@ describe("normalized plate-reading import module", () => {
       expect((error as InstrumentImportError).attempts.length).toBeGreaterThan(0);
       expect((error as InstrumentImportError).attempts[0].adapterId).toBe("thermo-skanit-workbook");
     }
+  });
+
+  it("combines separate instrument exports into one ordered multi-plate batch", async () => {
+    const batch = await importInstrumentFiles([
+      binarySource("day-0.xls", victorWorkbook()),
+      binarySource("day-1.xls", victorWorkbook()),
+    ]);
+
+    expect(batch).toMatchObject({ sourceKind: "instrument-file", sourceName: "day-0.xls; day-1.xls" });
+    expect(batch.plates).toHaveLength(2);
+    expect(batch.plates.map((plate) => plate.metadata.sourceFileName)).toEqual(["day-0.xls", "day-1.xls"]);
   });
 });

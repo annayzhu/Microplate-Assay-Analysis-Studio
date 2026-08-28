@@ -3,11 +3,12 @@ import { downloadArtifact, downloadBlob, downloadTextFile } from "./adapters/bro
 import { createArtifact, toolIdentity } from "./core/artifacts";
 import { assayModules, detectedAssayModule, getAssayWorkflow } from "./core/assay-workflows";
 import { defaultBaselineNormalizationConfig } from "./core/baseline-normalization";
-import { importPlateReadings } from "./core/import";
+import { importInstrumentFiles, importPlateReadings } from "./core/import";
 import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
 import { currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText, type LayoutPatch } from "./core/layout";
 import {
   defaultAnalysisConfig,
+  appendPlateWorkspace,
   openPlateWorkspace,
   planWorkspaceImport,
   readPlateWorkspace,
@@ -23,6 +24,7 @@ import { AssayWorkflowPanel, assayStatusLabel } from "./components/AssayWorkflow
 
 type View = "import" | "layout" | "analysis";
 type ImportMode = "instrument" | "paste" | "template";
+type ImportTarget = "append" | "replace";
 type DraftStatus = "idle" | "dirty" | "applied";
 type PlatePresentation = {
   zoom: number;
@@ -163,6 +165,12 @@ function templateIdForPlate(plate: ParsedPlate): string {
   return plateTemplateDefinitions.find((template) => template.rows === plate.rows && template.columns === plate.columns)?.id ?? defaultLayoutTemplateId;
 }
 
+function plateSwitcherLabel(plate: ParsedPlate, index: number, projectPlates: ParsedPlate[]): string {
+  const duplicateName = projectPlates.filter((candidate) => candidate.metadata.plateName === plate.metadata.plateName).length > 1;
+  const sourceStem = plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
+  return `${index + 1}. ${plate.metadata.plateName}${duplicateName && sourceStem !== plate.metadata.plateName ? ` · ${sourceStem}` : ""}`;
+}
+
 export default function App() {
   const instrumentInput = useRef<HTMLInputElement>(null);
   const readingTemplateInput = useRef<HTMLInputElement>(null);
@@ -178,6 +186,7 @@ export default function App() {
   const [pendingModuleIds, setPendingModuleIds] = useState<AssayModuleId[]>([]);
   const [pendingIncludedPlates, setPendingIncludedPlates] = useState<Set<number>>(new Set());
   const [pendingConflictConfirmed, setPendingConflictConfirmed] = useState(false);
+  const [pendingImportTarget, setPendingImportTarget] = useState<ImportTarget>("replace");
   const [manualText, setManualText] = useState("");
   const [manualDetectionMode, setManualDetectionMode] = useState<DetectionMode>("absorbance");
   const [manualSignalUnit, setManualSignalUnit] = useState("OD");
@@ -277,6 +286,7 @@ export default function App() {
     const detected = detectedAssayModule(item);
     return detected !== "unknown" && pendingModuleIds[index] !== detected;
   }) ?? false, [pendingBatch, pendingIncludedPlates, pendingModuleIds]);
+  const pendingCanAppend = Boolean(workspace && pendingBatch && pendingBatch.sourceKind !== "project-file");
   const displayedAnalysis = workspaceView?.displayedAnalysis ?? analysis;
   const displayedBiologicalSummaries = workspaceView?.displayedBiologicalSummaries ?? [];
   const displayedSignificanceComparisons = workspaceView?.displayedSignificanceComparisons ?? [];
@@ -352,6 +362,7 @@ export default function App() {
     setPendingModuleIds([...plan.moduleIds]);
     setPendingIncludedPlates(new Set(plan.includedPlateIndexes));
     setPendingConflictConfirmed(false);
+    setPendingImportTarget(workspace && batch.sourceKind !== "project-file" ? "append" : "replace");
     setNotice(`解析完成：识别到 ${batch.plates.length} 块板。请确认载入范围、实验类型和数据来源。`);
   }
 
@@ -359,23 +370,31 @@ export default function App() {
     if (!pendingIncludedPlates.size) return;
     if (!confirmDiscardDraft()) return;
     clearBatchDraft();
-    const nextWorkspace = openPlateWorkspace(planWorkspaceImport(batch, selectedModuleId, moduleSelectionTouched), {
+    const plan = planWorkspaceImport(batch, selectedModuleId, moduleSelectionTouched);
+    const options = {
       includedPlateIndexes: pendingIncludedPlates,
       moduleIds: pendingModuleIds,
       moduleSelectionTouched,
-    });
+    };
+    const append = pendingImportTarget === "append" && workspace && batch.sourceKind !== "project-file";
+    const previousPlateCount = workspace?.plates.length ?? 0;
+    const nextWorkspace = append ? appendPlateWorkspace(workspace, plan, options) : openPlateWorkspace(plan, options);
     const nextPlates = workspacePlates(nextWorkspace);
     setWorkspace(nextWorkspace);
     setMethodReviewOpen(false);
-    setPlatePresentations(nextPlates.map(() => ({ zoom: 1, zoomManuallyChanged: false })));
+    setPlatePresentations((current) => append
+      ? [...current, ...nextPlates.slice(previousPlateCount).map(() => ({ zoom: 1, zoomManuallyChanged: false }))]
+      : nextPlates.map(() => ({ zoom: 1, zoomManuallyChanged: false })));
     setPendingBatch(null);
     setPendingIncludedPlates(new Set());
     setPendingModuleIds([]);
     setPendingConflictConfirmed(false);
-    resetPlatePresentation(nextPlates[0]);
+    resetPlatePresentation(nextPlates[nextWorkspace.activePlateIndex]);
     setSelectedModuleId(nextWorkspace.selectedModuleId);
     setModuleSelectionTouched(false);
-    setNotice(`已载入 ${nextPlates.length} 块板，共 ${nextPlates.reduce((sum, item) => sum + item.wells.length, 0)} 个已测孔。原始读数保持只读。`);
+    setNotice(append
+      ? `已追加 ${pendingIncludedPlates.size} 块板；当前项目共 ${nextPlates.length} 块板。各板原始读数与 blank 独立保留。`
+      : `已载入 ${nextPlates.length} 块板，共 ${nextPlates.reduce((sum, item) => sum + item.wells.length, 0)} 个已测孔。原始读数保持只读。`);
     setView("import");
   }
 
@@ -425,12 +444,12 @@ export default function App() {
     setNotice(`实验方法已人工复核为“${label}”；仪器记录和系统原始识别保持不变。`);
   }
 
-  async function importInstrumentFile(file: File) {
+  async function importInstrumentFileSelection(files: File[]) {
     setLoading(true);
     setError("");
     setNotice("");
     try {
-      previewBatch(await importPlateReadings({ kind: "instrument-file", file }));
+      previewBatch(await importInstrumentFiles(files));
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "文件导入失败。");
     } finally {
@@ -662,10 +681,10 @@ export default function App() {
         </div>
 
         {importMode === "instrument" ? <>
-          <input ref={instrumentInput} hidden type="file" accept=".xml,.xlsx,.xls,.skax" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importInstrumentFile(file); event.target.value = ""; }} />
+          <input ref={instrumentInput} hidden multiple type="file" accept=".xml,.xlsx,.xls,.skax" onChange={(event) => { const files = [...(event.target.files ?? [])]; if (files.length) void importInstrumentFileSelection(files); event.target.value = ""; }} />
           <button type="button" className="dropzone" disabled={loading} onClick={() => instrumentInput.current?.click()}>
             <span className="dropzone-icon">DATA</span>
-            <span><strong>{loading ? "正在解析…" : plate ? "更换仪器文件" : "选择酶标仪导出文件"}</strong><small>支持 SkanIt XML / XLSX、旧版 XLS；SKAX 会话包请在 SkanIt 中导出 XML 或 XLSX 后分析。</small></span>
+            <span><strong>{loading ? "正在解析…" : plate ? "添加一个或多个仪器文件" : "选择一个或多个酶标仪导出文件"}</strong><small>可同时选择 Day 0、Day 1、Day 2 等独立文件；支持 SkanIt XML / XLSX 和旧版 XLS。</small></span>
             <b>Browse</b>
           </button>
         </> : <div className="manual-import-panel">
@@ -690,14 +709,18 @@ export default function App() {
         </div>}
 
         {pendingBatch ? <div className="import-preview" aria-label="导入预览">
-          <div className="import-preview-head"><div><h3>确认导入</h3><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : pendingBatch.sourceKind === "reading-template" ? "读数模板" : pendingBatch.sourceKind === "project-file" ? "可复现项目" : "仪器文件"}</span></div><p>识别到 {pendingBatch.plates.length} 块独立孔板 · 确认后替换当前工作区</p></div>
+          <div className="import-preview-head"><div><h3>确认导入</h3><span>{pendingBatch.sourceKind === "manual-paste" ? "人工粘贴" : pendingBatch.sourceKind === "reading-template" ? "读数模板" : pendingBatch.sourceKind === "project-file" ? "可复现项目" : "仪器文件"}</span></div><p>识别到 {pendingBatch.plates.length} 块独立孔板 · {pendingImportTarget === "append" && pendingCanAppend ? "将追加到当前项目" : "将替换当前项目"}</p></div>
+          {pendingCanAppend ? <div className="import-target-choice" role="radiogroup" aria-label="导入到项目">
+            <label className={pendingImportTarget === "append" ? "active" : ""}><input type="radio" name="import-target" value="append" checked={pendingImportTarget === "append"} onChange={() => setPendingImportTarget("append")} /><span><strong>追加到当前项目</strong><small>推荐用于不同日期或不同批次的板；保留现有板、注释与分析设置。</small></span></label>
+            <label className={pendingImportTarget === "replace" ? "active" : ""}><input type="radio" name="import-target" value="replace" checked={pendingImportTarget === "replace"} onChange={() => setPendingImportTarget("replace")} /><span><strong>替换当前项目</strong><small>清空当前工作区后载入所选板。</small></span></label>
+          </div> : null}
           <div className="preview-plate-list">{pendingBatch.plates.map((item, index) => {
             const detected = detectedAssayModule(item);
             const chosen = pendingModuleIds[index] ?? "unknown";
             const mismatch = pendingBatch.sourceKind === "instrument-file" && detected !== "unknown" && chosen !== detected;
             return <div key={`${item.metadata.plateName}-${index}`} className={`${pendingIncludedPlates.has(index) ? "included" : "excluded"} ${mismatch ? "module-mismatch" : ""}`}>
               <label className="preview-include"><input type="checkbox" aria-label={`载入 ${item.metadata.plateName}`} checked={pendingIncludedPlates.has(index)} onChange={(event) => setPendingIncludedPlates((current) => { const next = new Set(current); if (event.target.checked) next.add(index); else next.delete(index); return next; })} /></label>
-              <div className="preview-plate-summary"><strong>{item.metadata.plateName}</strong><span>{item.rows} × {item.columns} · {item.wells.length} 个已测孔</span><small>{item.warnings[0] || "结构检查通过"}</small></div>
+              <div className="preview-plate-summary"><strong>{item.metadata.plateName}</strong><span title={item.metadata.sourceFileName}>{item.metadata.sourceFileName} · {item.rows} × {item.columns} · {item.wells.length} 个已测孔</span><small>{item.warnings[0] || "结构检查通过"}</small></div>
               <div className="module-review"><small>系统识别</small><strong>{detected === "unknown" ? "未可靠识别" : getAssayWorkflow(detected).name}</strong></div>
               <label className="module-confirm"><span>载入到</span><select value={chosen} onChange={(event) => { const next = [...pendingModuleIds]; next[index] = event.target.value as AssayModuleId; setPendingModuleIds(next); setPendingConflictConfirmed(false); }}>{assayModules.filter((module) => module.status !== "planned").map((module) => <option key={module.id} value={module.id}>{module.name} · {assayStatusLabel(module.status)}</option>)}<option value="unknown">通用酶标数据预览</option></select></label>
               {mismatch ? <b className="mismatch-badge">选择与识别不一致</b> : null}
@@ -705,11 +728,11 @@ export default function App() {
           })}</div>
           {pendingBatch.warnings.length ? <ul className="preview-warnings">{pendingBatch.warnings.map((warning, index) => <li key={`${warning}-${index}`}>{warning}</li>)}</ul> : null}
           {pendingHasConflict ? <label className="conflict-confirm"><input type="checkbox" checked={pendingConflictConfirmed} onChange={(event) => setPendingConflictConfirmed(event.target.checked)} />我已核对实验记录，确认按“载入到”所选模块继续；系统识别结果会保留在溯源信息中。</label> : null}
-          <div className="manual-import-actions"><button type="button" className="secondary-button" onClick={() => setPendingBatch(null)}>取消</button><button type="button" className="primary-button" disabled={!pendingIncludedPlates.size || (pendingHasConflict && !pendingConflictConfirmed)} onClick={() => loadBatch(pendingBatch)}>确认载入 {pendingIncludedPlates.size} 块板</button></div>
+          <div className="manual-import-actions"><button type="button" className="secondary-button" onClick={() => setPendingBatch(null)}>取消</button><button type="button" className="primary-button" disabled={!pendingIncludedPlates.size || (pendingHasConflict && !pendingConflictConfirmed)} onClick={() => loadBatch(pendingBatch)}>{pendingImportTarget === "append" && pendingCanAppend ? "确认追加" : "确认载入"} {pendingIncludedPlates.size} 块板</button></div>
         </div> : null}
 
         <AssayWorkflowPanel variant="disclosure" module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
-        {plates.length > 1 ? <div className="plate-switcher"><div><strong>本次导入包含 {plates.length} 块板</strong><small>各板注释与分析相互独立，不会自动合并为生物学重复。</small></div><div className="plate-switcher-buttons">{plates.map((item, index) => <button type="button" key={`${item.metadata.plateName}-${index}`} className={index === activePlateIndex ? "active" : ""} onClick={() => selectActivePlate(index)}>{index + 1}. {item.metadata.plateName}</button>)}</div><label>当前板名称<input value={plate?.metadata.plateName ?? ""} onChange={(event) => renameActivePlate(event.target.value)} /></label></div> : null}
+        {plates.length > 1 ? <div className="plate-switcher"><div><strong>当前项目包含 {plates.length} 块板</strong><small>各板分别扣除自己的 blank；不同日期通过时间点和 baseline 设置关联，不会自动冒充生物学重复。</small></div><div className="plate-switcher-buttons">{plates.map((item, index) => { const label = plateSwitcherLabel(item, index, plates); return <button type="button" title={label} key={item.plateId ?? `${item.metadata.plateName}-${index}`} className={index === activePlateIndex ? "active" : ""} onClick={() => selectActivePlate(index)}>{label}</button>; })}</div><label>当前板名称<input value={plate?.metadata.plateName ?? ""} onChange={(event) => renameActivePlate(event.target.value)} /></label></div> : null}
         {plate ? <div className="experiment-overview">
           <div className="experiment-overview-head"><div><h3>本次实验基本信息</h3><p>仪器报告值、用户填写值和推断项分别保留；人工确认不会覆盖原始记录。</p></div>{plate.metadata.assayMethodReviewDecision === "user-confirmed" ? <button type="button" className="evidence-badge user-reviewed" onClick={openMethodReview}>已复核 · 修改</button> : plate.metadata.assayMethodEvidence === "reported" ? <span className="evidence-badge reported">协议已记录</span> : plate.metadata.assayMethodEvidence === "user-reported" ? <span className="evidence-badge user-reported">用户已填写</span> : assayMethodNeedsReview ? <button type="button" className={`evidence-badge review-action ${plate.metadata.assayMethodEvidence}`} onClick={openMethodReview}>核对实验方法</button> : null}</div>
           {methodReviewOpen ? <div className="method-review-panel" aria-label="实验方法复核">
@@ -837,14 +860,15 @@ export default function App() {
             <div className="panel-head compact-panel-head"><div><h3>分析设置</h3><p>显著性参考、显示变换与 QC 阈值彼此独立。</p></div></div>
             <div className="side-control-grid">
               <Field label="显著性参考组"><select value={config.controlGroup} onChange={(event) => updateAnalysisConfig({ controlGroup: event.target.value, relativeToControlEnabled: event.target.value ? config.relativeToControlEnabled : false }, true)}><option value="">不做组间显著性比较</option>{groups.map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="field-help">{config.controlGroup ? `显著性将各 group 与 ${config.controlGroup} 比较。${!controlGroupTouched && inferredControlGroup === config.controlGroup ? "系统已根据 role=control 识别，可手动更改。" : ""}` : inferredControlGroup ? `检测到可能的对照组 ${inferredControlGroup}；选择后才启用比较。` : "该选择不会自动改变图表尺度。"}</small></Field>
-              <label className="check-row compact-check"><input type="checkbox" checked={Boolean(config.relativeToControlEnabled)} disabled={!config.controlGroup} onChange={(event) => updateAnalysisConfig({ relativeToControlEnabled: event.target.checked })} />固定参考组缩放到同时间点对照 (%)</label>
-              {config.relativeToControlEnabled ? <p className="field-help">Fixed-reference scaling：把对照组均值视为无误差常数，SD/SEM 仅按该常数缩放，不传播分母不确定性。</p> : null}
+              <label className="check-row compact-check"><input type="checkbox" checked={Boolean(config.relativeToControlEnabled)} disabled={!config.controlGroup} onChange={(event) => updateAnalysisConfig({ relativeToControlEnabled: event.target.checked })} />各时间点对照设为 100%（仅显示/导出）</label>
+              {config.relativeToControlEnabled ? <p className="field-help">用于同一时间点的处理组 vs 对照展示，不是 Day 0 基线比较。对照均值视为固定常数，SD/SEM 仅同比例缩放。</p> : null}
               <Field label="技术复孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.technicalCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ technicalCvThresholdPercent: Number(event.target.value) })} /></Field>
               <Field label="空白孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.blankCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ blankCvThresholdPercent: Number(event.target.value) })} /></Field>
             </div>
             <details className="baseline-normalization-controls">
-              <summary><span>Baseline normalization</span><em>{normalizationConfig.enabled ? baselineNormalization.status : "默认关闭"}</em></summary>
+              <summary><span>跨板时间序列 · Baseline normalization</span><em>{normalizationConfig.enabled ? baselineNormalization.status : "默认关闭"}</em></summary>
               <div className="baseline-normalization-body">
+                <p className="field-help baseline-intro">用于 Day 0、Day 1、Day 2 分布在不同孔板/文件的增殖实验。先把各文件追加到同一项目，再在板图中为样本和对照填写准确时间点。</p>
                 <label className="check-row compact-check"><input type="checkbox" checked={normalizationConfig.enabled} onChange={(event) => updateBaselineNormalization({ enabled: event.target.checked })} />启用派生标准化</label>
                 <Field label="Baseline timepoint"><select value={normalizationConfig.baselineTimepoint} onChange={(event) => updateBaselineNormalization({ baselineTimepoint: event.target.value })}><option value="">请选择精确时间点</option>{normalizationTimepoints.map((timepoint) => <option key={timepoint} value={timepoint}>{timepoint}</option>)}</select></Field>
                 <Field label="标准化范围"><select value={normalizationConfig.scope} onChange={(event) => updateBaselineNormalization({ scope: event.target.value as BaselineNormalizationConfig["scope"] })}><option value="within-group">每组归一到自身 baseline</option><option value="reference-group">全部归一到参考组 baseline</option></select></Field>
