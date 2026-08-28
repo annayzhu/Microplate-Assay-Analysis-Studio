@@ -183,20 +183,22 @@ function sourceStem(plate: ParsedPlate): string {
   return plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
 }
 
-function LayoutPlateTabs({ plates, activePlateIndex, onSelect }: {
+function PlateContextTabs({ plates, activePlateIndex, onSelect, context }: {
   plates: ParsedPlate[];
   activePlateIndex: number;
   onSelect: (index: number) => void;
+  context: "layout" | "analysis";
 }) {
   const active = plates[activePlateIndex];
   if (!active) return null;
-  return <section className="layout-plate-context" aria-label="当前板与项目孔板">
-    <div className="layout-active-plate">
-      <span>当前板 {activePlateIndex + 1} / {plates.length}</span>
+  const contextLabel = context === "analysis" ? "当前分析板" : "当前板";
+  return <section className={`plate-context-switcher ${context}-plate-context`} aria-label={`${contextLabel}与项目孔板`}>
+    <div className="active-plate-identity">
+      <span>{contextLabel} {activePlateIndex + 1} / {plates.length}</span>
       <strong>{active.metadata.plateName}</strong>
       <small title={active.metadata.sourceFileName}>{active.metadata.sourceFileName}</small>
     </div>
-    {plates.length > 1 ? <nav className="layout-plate-tabs" aria-label="切换项目孔板">
+    {plates.length > 1 ? <nav className="plate-context-tabs" aria-label={context === "analysis" ? "切换分析孔板" : "切换项目孔板"}>
       {plates.map((item, index) => {
         const label = plateSwitcherLabel(item, index, plates);
         return <button
@@ -808,20 +810,22 @@ export default function App() {
       </section> : null}
 
       {view === "layout" && plate ? <section className="workspace">
-        <div className="section-heading split">
+        <div className="section-heading split layout-section-heading">
           <div><h2>板图与实验注释</h2><p>{activeModule.annotationGuidance} 仪器标签不是实验分组，系统不会根据原始读数高低猜测角色或重复。</p></div>
-          <div className="inline-actions">
-            <PreviousStepButton label="返回数据导入" onClick={() => navigateTo("import")} />
+          <div className="layout-heading-actions" role="toolbar" aria-label="板图操作">
             <input ref={layoutInput} hidden type="file" accept=".csv,.tsv,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewLayoutFile(file); event.target.value = ""; }} />
-            <select className="template-select" value={layoutTemplateId} onChange={(event) => setLayoutTemplateId(event.target.value)} aria-label="板图模板类型">
-              {plateTemplateDefinitions.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
-            </select>
-            <button className="secondary-button" type="button" onClick={() => downloadTextFile(`microplate-layout-template-${selectedTemplate.id}well.csv`, layoutTemplateCsv(selectedTemplate), "text/csv")}>下载板图模板</button>
-            <button className="secondary-button" type="button" onClick={downloadCurrentLayout}>导出当前板布局</button>
-            <button className="secondary-button" type="button" onClick={() => layoutInput.current?.click()}>导入板布局</button>
+            <div className="layout-action-group layout-navigation-actions"><PreviousStepButton label="返回数据导入" onClick={() => navigateTo("import")} /></div>
+            <div className="layout-action-group layout-template-actions">
+              <select className="template-select" value={layoutTemplateId} onChange={(event) => setLayoutTemplateId(event.target.value)} aria-label="板图模板类型">
+                {plateTemplateDefinitions.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
+              </select>
+              <button className="secondary-button" type="button" onClick={() => downloadTextFile(`microplate-layout-template-${selectedTemplate.id}well.csv`, layoutTemplateCsv(selectedTemplate), "text/csv")}>下载板图模板</button>
+              <button className="secondary-button" type="button" onClick={() => layoutInput.current?.click()}>导入板布局</button>
+            </div>
+            <div className="layout-action-group layout-export-actions"><button className="secondary-button" type="button" onClick={downloadCurrentLayout}>导出当前板布局</button></div>
           </div>
         </div>
-        <LayoutPlateTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} />
+        <PlateContextTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} context="layout" />
         {layoutImportPreview && pendingLayoutFile ? <section className="layout-import-preview" aria-label="板布局导入预览">
           <div className="layout-import-preview-head">
             <div><h3>板布局导入预览</h3><p title={pendingLayoutFile.name}>{pendingLayoutFile.name}{layoutImportPreview.metadata.plateName ? ` · 来源板：${layoutImportPreview.metadata.plateName}` : ""}</p></div>
@@ -898,6 +902,7 @@ export default function App() {
           <div><h2>分析与导出</h2><p>按 SkanIt 测量和计算步骤浏览终点、动力学、光谱、标准曲线与多通道归一化结果。</p></div>
           <div className="analysis-heading-actions"><PreviousStepButton label="返回板图与注释" onClick={() => navigateTo("layout")} /><span className="readiness ready">{assayStatusLabel(activeModule.status)}</span></div>
         </div>
+        <PlateContextTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} context="analysis" />
         <AssayWorkflowPanel module={activeModule} plate={plate} />
         <AssayDataExplorer dataset={plate.assayData} onExport={() => downloadArtifact(createArtifact({ kind: "measurements", plate, wells, scope: "all" }))} onExportProject={downloadProjectFile} />
       </section> : null}
@@ -907,6 +912,7 @@ export default function App() {
           <div><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和结果导出都只保留当前展示范围。</p></div>
           <div className="analysis-heading-actions"><PreviousStepButton label="返回板图与注释" onClick={() => navigateTo("layout")} /><span className={`readiness ${analysis.ready ? "ready" : "review"}`}>{analysis.ready ? "Ready for export" : "Review required"}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></div>
         </div>
+        <PlateContextTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} context="analysis" />
         <div className="analysis-layout-compact">
           <aside className="panel analysis-side-panel">
             <div className="panel-head compact-panel-head"><div><h3>分析设置</h3><p>显著性参考、显示变换与 QC 阈值彼此独立。</p></div></div>
