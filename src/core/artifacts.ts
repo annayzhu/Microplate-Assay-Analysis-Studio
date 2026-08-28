@@ -1,7 +1,9 @@
 import packageMetadata from "../../package.json";
+import { defaultBaselineNormalizationConfig } from "./baseline-normalization";
 import type {
   AnalysisConfig,
   AssayModuleId,
+  BaselineNormalizationResult,
   CellViabilityAnalysisResult,
   ExperimentRecord,
   ParsedPlate,
@@ -10,7 +12,7 @@ import type {
 } from "./types";
 
 export const toolIdentity = { id: "microplate-assay-studio", version: packageMetadata.version } as const;
-export const projectSchemaVersion = 2;
+export const projectSchemaVersion = 3;
 
 export type ReproducibleArtifact = {
   filename: string;
@@ -20,8 +22,10 @@ export type ReproducibleArtifact = {
 
 export type ArtifactRequest =
   | { kind: "project"; plates: ParsedPlate[]; experiment: ExperimentRecord; activeModuleId: AssayModuleId; analysisConfig: AnalysisConfig; sourceName?: string }
-  | { kind: "analysis-package"; plate: ParsedPlate; wells: WellRecord[]; analysisConfig: AnalysisConfig; result: CellViabilityAnalysisResult }
+  | { kind: "analysis-package"; plate: ParsedPlate; plates: ParsedPlate[]; wells: WellRecord[]; analysisConfig: AnalysisConfig; result: CellViabilityAnalysisResult; normalizationResult?: BaselineNormalizationResult }
   | { kind: "annotated-wells" | "technical-summary" | "biological-summary"; plate: ParsedPlate; result: CellViabilityAnalysisResult; scope: string; analysisConfig?: AnalysisConfig }
+  | { kind: "normalization-ready"; plates: ParsedPlate[]; result: BaselineNormalizationResult; sourceName?: string }
+  | { kind: "normalized-results"; plates: ParsedPlate[]; result: BaselineNormalizationResult; sourceName?: string }
   | { kind: "measurements"; plate: ParsedPlate; wells?: WellRecord[]; scope?: string };
 
 type ProjectDocument = {
@@ -76,7 +80,7 @@ function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: Parsed
   const headers = [
     "category", "group", "treatment", "concentration", "timepoint", "n_biological", "signal_basis",
     "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
-    "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
+    "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference", "normalization_method", "normalization_note",
     "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source",
   ];
   return rowsToCsv(headers, result.biologicalSummaries.map((row) => {
@@ -90,11 +94,81 @@ function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: Parsed
       relative_to_control_percent: row.relativeActivityPercent, relative_to_control_sd_percent: row.relativeSdPercent,
       relative_to_control_sem_percent: row.relativeSemPercent,
       normalization_reference: row.relativeActivityPercent === null ? "" : analysisConfig?.controlGroup ?? comparison?.controlGroup ?? "control group",
+      normalization_method: row.relativeActivityPercent === null ? "" : "fixed-reference-scaling",
+      normalization_note: row.relativeActivityPercent === null ? "" : "Control mean is treated as an error-free fixed reference; denominator uncertainty is ignored.",
       p_value_vs_control: comparison?.pValue ?? "",
       fdr_vs_control: comparison?.adjustedPValue ?? "", significance: comparison?.label ?? "",
       plate_name: plate.metadata.plateName, import_source: plate.metadata.sourceKind,
     };
   }));
+}
+
+function normalizationReadyCsv(result: BaselineNormalizationResult): string {
+  const qcCodes = [...new Set(result.findings.map((finding) => finding.code))];
+  const qcStatus = result.findings.some((finding) => finding.severity === "error") ? "blocked" : result.findings.length ? "review" : "clear";
+  const headers = [
+    "plate_id", "plate_name", "source_file", "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate",
+    "n_technical", "wells", "plate_blank_mean", "blank_corrected_biological_value", "baseline_candidate",
+    "group_original_mean", "group_original_sd", "group_original_sem", "group_original_n", "normalization_qc_status", "normalization_qc_codes",
+  ];
+  return rowsToCsv(headers, result.normalizationReadyRows.map((row) => ({
+    plate_id: row.plateId,
+    plate_name: row.plateName,
+    source_file: row.sourceFileName,
+    sample_id: row.sampleId,
+    group: row.group,
+    treatment: row.treatment,
+    concentration: row.concentration,
+    timepoint: row.timepoint,
+    biological_replicate: row.biologicalReplicate,
+    n_technical: row.nTechnical,
+    wells: row.wells.join(";"),
+    plate_blank_mean: row.blankMean,
+    blank_corrected_biological_value: row.blankCorrectedBiologicalValue,
+    baseline_candidate: row.baselineCandidate,
+    group_original_mean: row.groupOriginalMean,
+    group_original_sd: row.groupOriginalSd,
+    group_original_sem: row.groupOriginalSem,
+    group_original_n: row.groupOriginalN,
+    normalization_qc_status: qcStatus,
+    normalization_qc_codes: qcCodes.join(";"),
+  })));
+}
+
+function normalizedResultsCsv(result: BaselineNormalizationResult): string {
+  if (result.status !== "ready") throw new Error("Baseline normalization 尚未启用或存在阻断问题，不能导出 normalized results。");
+  const headers = [
+    "group", "treatment", "concentration", "timepoint", "baseline_group", "baseline_timepoint", "normalization_method", "pairing_status",
+    "normalized_mean", "normalized_sd", "normalized_sem", "propagated_se", "ci95_low", "ci95_high", "scale", "n",
+    "uncertainty_method", "baseline_original_mean", "baseline_original_sd", "baseline_original_sem", "baseline_n", "plate_ids", "plate_names", "warnings", "provenance",
+  ];
+  return rowsToCsv(headers, result.normalizedRows.map((row) => ({
+    group: row.group,
+    treatment: row.treatment,
+    concentration: row.concentration,
+    timepoint: row.timepoint,
+    baseline_group: row.baselineGroup,
+    baseline_timepoint: row.baselineTimepoint,
+    normalization_method: row.method,
+    pairing_status: row.pairingStatus,
+    normalized_mean: row.normalizedMean,
+    normalized_sd: row.normalizedSd,
+    normalized_sem: row.normalizedSem,
+    propagated_se: row.propagatedSe,
+    ci95_low: row.ci95Low,
+    ci95_high: row.ci95High,
+    scale: row.scale,
+    n: row.n,
+    uncertainty_method: row.uncertaintyMethod,
+    baseline_original_mean: row.baselineOriginalMean,
+    baseline_original_sd: row.baselineOriginalSd,
+    baseline_original_sem: row.baselineOriginalSem,
+    baseline_n: row.baselineN,
+    plate_ids: row.plateIds.join(";"),
+    plate_names: row.plateNames.join(";"),
+    warnings: row.warnings.join(" | "),
+    provenance: "Calculated in Studio",
+  })));
 }
 
 function measurementsCsv(plate: ParsedPlate, annotatedWells: WellRecord[] = plate.wells): string {
@@ -124,7 +198,7 @@ function measurementsCsv(plate: ParsedPlate, annotatedWells: WellRecord[] = plat
 function assertProject(value: unknown): asserts value is ProjectDocument {
   if (!value || typeof value !== "object") throw new Error("项目文件不是有效的 JSON 对象。");
   const project = value as Partial<ProjectDocument>;
-  if (project.schemaVersion !== projectSchemaVersion) throw new Error(`项目文件版本不受支持：${String(project.schemaVersion ?? "未知")}。当前支持版本 ${projectSchemaVersion}。`);
+  if (project.schemaVersion !== 2 && project.schemaVersion !== projectSchemaVersion) throw new Error(`项目文件版本不受支持：${String(project.schemaVersion ?? "未知")}。当前支持版本 2–${projectSchemaVersion}。`);
   if (project.tool?.id !== toolIdentity.id) throw new Error("该 JSON 不是 Microplate Assay Studio 项目文件。");
   if (!Array.isArray(project.plates) || !project.plates.length) throw new Error("项目文件中没有培养板数据。");
   for (const [index, plate] of project.plates.entries()) {
@@ -142,7 +216,10 @@ export function createArtifact(request: ArtifactRequest): ReproducibleArtifact {
       generatedAt: new Date().toISOString(),
       experiment: request.experiment,
       activeModuleId: request.activeModuleId,
-      analysisConfig: request.analysisConfig,
+      analysisConfig: {
+        ...request.analysisConfig,
+        baselineNormalization: { ...defaultBaselineNormalizationConfig, ...request.analysisConfig.baselineNormalization },
+      },
       plates: request.plates.map((plate) => ({ ...plate, metadata: { ...plate.metadata }, wells: plate.wells.map((well) => ({ ...well })) })),
     };
     return { filename: artifactName(request.sourceName ?? request.plates[0].metadata.sourceFileName, "reproducible-project.json"), mimeType: "application/json", content: JSON.stringify(project, null, 2) };
@@ -155,10 +232,26 @@ export function createArtifact(request: ArtifactRequest): ReproducibleArtifact {
         schemaVersion: 1, tool: toolIdentity, assay: { id: "cell-viability", label: request.plate.metadata.assayMethodLabel },
         generatedAt: new Date().toISOString(), source: request.plate.metadata, config: request.analysisConfig,
         annotations: request.wells.map(({ rawValue: _rawValue, ...well }) => well),
+        projectSources: request.plates.map((plate) => ({
+          plateId: plate.plateId,
+          source: plate.metadata,
+          rows: plate.rows,
+          columns: plate.columns,
+          wells: plate.wells.map((well) => ({ ...well })),
+        })),
         qc: { ready: request.result.ready, blankMean: request.result.blankMean, blankSd: request.result.blankSd, blankCvPercent: request.result.blankCvPercent, findings: request.result.findings },
-        resultSummary: request.result.biologicalSummaries, significance: request.result.significanceComparisons,
+        resultSummary: request.result.biologicalSummaries,
+        significance: request.result.significanceComparisons,
+        primaryResults: { biologicalSummary: request.result.biologicalSummaries, significance: request.result.significanceComparisons },
+        derivedNormalization: request.normalizationResult ?? null,
       }, null, 2),
     };
+  }
+  if (request.kind === "normalization-ready") {
+    return { filename: artifactName(request.sourceName ?? request.plates[0]?.metadata.sourceFileName ?? "microplate", "normalization-ready.csv"), mimeType: "text/csv", content: normalizationReadyCsv(request.result) };
+  }
+  if (request.kind === "normalized-results") {
+    return { filename: artifactName(request.sourceName ?? request.plates[0]?.metadata.sourceFileName ?? "microplate", "normalized-results.csv"), mimeType: "text/csv", content: normalizedResultsCsv(request.result) };
   }
   if (request.kind === "measurements") {
     return { filename: artifactName(request.plate.metadata.sourceFileName, `${request.scope ?? "all"}-measurements.csv`), mimeType: "text/csv", content: measurementsCsv(request.plate, request.wells) };
@@ -182,6 +275,13 @@ export function parseProjectArtifact(rawText: string, sourceFileName: string): P
   return {
     id: `project-file-${Date.now()}`, sourceKind: "project-file", sourceName: sourceFileName, plates,
     warnings: plates.flatMap((plate) => plate.warnings), experiment: parsed.experiment,
-    restoredActiveModuleId: parsed.activeModuleId, restoredAnalysisConfig: parsed.analysisConfig,
+    restoredActiveModuleId: parsed.activeModuleId,
+    restoredAnalysisConfig: {
+      ...parsed.analysisConfig,
+      relativeToControlEnabled: parsed.schemaVersion === 2
+        ? Boolean(parsed.analysisConfig.controlGroup)
+        : Boolean(parsed.analysisConfig.relativeToControlEnabled),
+      baselineNormalization: { ...defaultBaselineNormalizationConfig, ...parsed.analysisConfig.baselineNormalization },
+    },
   };
 }

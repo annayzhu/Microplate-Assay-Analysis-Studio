@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { assertSignals, dragBetweenWells, manualPlateMatrix, openAcceptanceBrowser } from "./acceptance-harness.mjs";
 
 const screenshotDir = process.argv[2];
@@ -8,6 +8,56 @@ await mkdir(resolve(screenshotDir), { recursive: true });
 
 const { browser, page, consoleErrors } = await openAcceptanceBrowser();
 const baseUrl = process.env.MICROPLATE_BASE_URL ?? "http://127.0.0.1:4178/";
+
+function normalizationPlate(name, timepoint, blank, values) {
+  const wells = [
+    { well: "A1", row: "A", column: 1, rawValue: blank, role: "blank" },
+    { well: "A2", row: "A", column: 2, rawValue: blank, role: "blank" },
+  ];
+  let cursor = 0;
+  Object.entries(values).forEach(([group, replicates]) => replicates.forEach((correctedMean, biologicalIndex) => {
+    [-0.02, 0.02].forEach((offset, technicalIndex) => {
+      const row = String.fromCharCode(66 + Math.floor(cursor / 12));
+      const column = cursor % 12 + 1;
+      wells.push({
+        well: `${row}${column}`, row, column, rawValue: blank + correctedMean + offset,
+        instrumentLabel: "", role: group === "Control" ? "control" : "sample",
+        sampleId: `${group}-Bio${biologicalIndex + 1}`, group, treatment: "", concentration: "", timepoint,
+        biologicalReplicate: `Bio${biologicalIndex + 1}`, technicalReplicate: `T${technicalIndex + 1}`,
+        excluded: false, notes: "",
+      });
+      cursor += 1;
+    });
+  }));
+  wells[0] = { instrumentLabel: "", sampleId: "", group: "", treatment: "", concentration: "", timepoint: "", biologicalReplicate: "", technicalReplicate: "", excluded: false, notes: "", ...wells[0] };
+  wells[1] = { instrumentLabel: "", sampleId: "", group: "", treatment: "", concentration: "", timepoint: "", biologicalReplicate: "", technicalReplicate: "", excluded: false, notes: "", ...wells[1] };
+  return {
+    metadata: {
+      sourceKind: "manual-paste", sourceFileName: `${name}.tsv`, sourceExperiment: "Browser normalization", runTimestamp: "",
+      assayMethod: "cck8", assayMethodLabel: "CCK-8", assayMethodEvidence: "user-reported", detectionMode: "absorbance", signalUnit: "OD",
+      wavelengthNm: 450, excitationWavelengthNm: null, emissionWavelengthNm: null, referenceWavelengthNm: null, measurementName: "Absorbance",
+      plateName: name, plateType: "96-well", instrumentManufacturer: "", instrumentModel: "Manual", instrumentSerialNumber: "", assayId: "",
+      protocolName: "", readDirection: "", measurementTimeSeconds: null, temperatureStartC: null, temperatureEndC: null, sheetName: name,
+      adapterId: "browser:normalization", assayModuleId: "cell-viability", detectedAssayModuleId: "cell-viability", selectedAssayModuleId: "cell-viability",
+      confirmedAssayModuleId: "cell-viability", assayAssignmentDecision: "project-restored",
+    },
+    rows: 8, columns: 12, wells, warnings: [],
+  };
+}
+
+const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
+await writeFile(normalizationProjectPath, JSON.stringify({
+  schemaVersion: 3,
+  tool: { id: "microplate-assay-studio", version: "0.6.0" },
+  generatedAt: new Date(0).toISOString(),
+  experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
+  activeModuleId: "cell-viability",
+  analysisConfig: { controlGroup: "Control", relativeToControlEnabled: false, technicalCvThresholdPercent: 15, blankCvThresholdPercent: 10, baselineNormalization: { enabled: false, plateSelectionMode: "all", participatingPlateIds: [], baselineTimepoint: "", scope: "within-group", referenceGroup: "", method: "auto", scale: "fold", uncertaintyDisplay: "ci95" } },
+  plates: [
+    normalizationPlate("Plate Day 0", "Day 0", 0.1, { Control: [1, 1.2, 0.8], Drug: [1, 2, 4] }),
+    normalizationPlate("Plate Day 1", "Day 1", 0.2, { Control: [1.4, 1.5, 1.3], Drug: [2, 6, 8] }),
+  ],
+}, null, 2));
 
 try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -300,12 +350,47 @@ try {
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-victor-layout.png"), fullPage: true });
   }
 
+  await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
+  await page.locator('input[type="file"][accept=".json"]').setInputFiles(normalizationProjectPath);
+  await page.getByRole("heading", { name: "确认导入" }).waitFor();
+  await page.getByRole("button", { name: "确认载入 2 块板" }).click();
+  await page.getByRole("button", { name: "进入板图与注释" }).click();
+  await page.getByRole("button", { name: "进入分析" }).click();
+  const normalizationDisclosure = page.locator(".baseline-normalization-controls");
+  await normalizationDisclosure.locator("summary").click();
+  await page.getByLabel("Baseline timepoint").selectOption("Day 0");
+  await page.getByLabel("启用派生标准化").check();
+  await page.getByText("Calculated in Studio · baseline normalization", { exact: true }).waitFor();
+  const normalizationStatusText = await normalizationDisclosure.innerText();
+  if (!normalizationStatusText.toLowerCase().includes("ready")) throw new Error(`Baseline normalization did not reach ready state in the browser.\n${normalizationStatusText}`);
+  const normalizedDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "标准化结果" }).click();
+  const normalizedDownload = await normalizedDownloadEvent;
+  if (!normalizedDownload.suggestedFilename().includes("normalized-results.csv")) throw new Error("Normalized-results CSV was not exported.");
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-baseline-normalization.png"), fullPage: true });
+
+  const normalizationProjectDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存可复现项目" }).click();
+  const normalizationProjectDownload = await normalizationProjectDownloadEvent;
+  const normalizationRoundTripPath = await normalizationProjectDownload.path();
+  if (!normalizationRoundTripPath) throw new Error("Normalized project round-trip download path is missing.");
+  await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
+  await page.locator('input[type="file"][accept=".json"]').setInputFiles(normalizationRoundTripPath);
+  await page.getByRole("heading", { name: "确认导入" }).waitFor();
+  await page.getByRole("button", { name: "确认载入 2 块板" }).click();
+  await page.getByRole("button", { name: "进入板图与注释" }).click();
+  await page.getByRole("button", { name: "进入分析" }).click();
+  await page.locator(".baseline-normalization-controls summary").click();
+  if (!await page.getByLabel("启用派生标准化").isChecked()) throw new Error("Project round-trip did not restore enabled baseline normalization.");
+  if (await page.getByLabel("Baseline timepoint").inputValue() !== "Day 0") throw new Error("Project round-trip did not restore the exact baseline timepoint.");
+
   const result = {
     title: await page.title(),
     importSignals: requiredImportSignals,
     layoutSignals: requiredLayoutSignals,
     incompleteLayoutGateVisible,
     manualUnassignedGateVisible: manualAnalysisText.includes("ROLE_UNASSIGNED"),
+    baselineNormalizationRoundTrip: true,
     genericLuxSignals,
     optionalVendorScenarios: { cck8: Boolean(process.env.CCK8_XLS), dualLuciferase: Boolean(process.env.DUAL_LUC_XLS), victor: Boolean(process.env.VICTOR_XLS) },
     consoleErrors,

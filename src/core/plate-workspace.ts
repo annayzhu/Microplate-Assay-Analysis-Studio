@@ -1,4 +1,5 @@
 import { analyzeCellViability } from "./assays/cell-viability";
+import { analyzeBaselineNormalization, defaultBaselineNormalizationConfig } from "./baseline-normalization";
 import { assignmentDecision, detectedAssayModule, getAssayWorkflow } from "./assay-workflows";
 import {
   aggregatePlate,
@@ -14,6 +15,7 @@ import {
 import type {
   AnalysisConfig,
   AssayModuleId,
+  BaselineNormalizationResult,
   BiologicalSummary,
   CellViabilityAnalysisResult,
   ExperimentRecord,
@@ -26,8 +28,10 @@ import type {
 
 export const defaultAnalysisConfig: AnalysisConfig = {
   controlGroup: "",
+  relativeToControlEnabled: false,
   technicalCvThresholdPercent: 15,
   blankCvThresholdPercent: 10,
+  baselineNormalization: defaultBaselineNormalizationConfig,
 };
 
 export type WorkspaceImportPlan = {
@@ -68,6 +72,7 @@ export type PlateWorkspaceView = {
   groups: string[];
   inferredControlGroup: string;
   analysis: CellViabilityAnalysisResult;
+  baselineNormalization: BaselineNormalizationResult;
   useGenericWorkflow: boolean;
   workflowReady: boolean;
   selectedWells: WellRecord[];
@@ -78,6 +83,17 @@ export type PlateWorkspaceView = {
 };
 
 const analyzableGroupRoles: WellRole[] = ["sample", "control"];
+
+function stablePlateId(plate: ParsedPlate, importIndex: number): string {
+  if (plate.plateId) return plate.plateId;
+  const source = [plate.metadata.sourceFileName, plate.metadata.sheetName, plate.metadata.adapterId, importIndex].join("¦");
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `plate-${importIndex + 1}-${(hash >>> 0).toString(36)}`;
+}
 
 function looksLikeControlGroup(group: string): boolean {
   return /(control|vehicle|mock|dmso|nc|negative|untreated|ctrl|对照|陰性|阴性)/i.test(group);
@@ -143,6 +159,7 @@ export function openPlateWorkspace(
     const confirmedModuleId = moduleIds[index] ?? "unknown";
     const nextPlate: ParsedPlate = {
       ...plate,
+      plateId: stablePlateId(plate, index),
       metadata: {
         ...plate.metadata,
         detectedAssayModuleId: detected,
@@ -163,7 +180,14 @@ export function openPlateWorkspace(
     selectedWellIds: new Set(),
     selectionAnchor: null,
     selectedSummaryKeys: new Set(),
-    analysisConfig: plan.batch.restoredAnalysisConfig ?? defaultAnalysisConfig,
+    analysisConfig: plan.batch.restoredAnalysisConfig ? {
+      ...defaultAnalysisConfig,
+      ...plan.batch.restoredAnalysisConfig,
+      baselineNormalization: {
+        ...defaultBaselineNormalizationConfig,
+        ...plan.batch.restoredAnalysisConfig.baselineNormalization,
+      },
+    } : defaultAnalysisConfig,
     controlGroupTouched: Boolean(plan.batch.restoredAnalysisConfig?.controlGroup),
     experiment: plan.batch.experiment ?? { name: "", operator: "", date: "", notes: "" },
   });
@@ -181,7 +205,7 @@ export function transitionPlateWorkspace(workspace: PlateWorkspace, action: Plat
       selectedWellIds: new Set(),
       selectionAnchor: null,
       selectedSummaryKeys: new Set(),
-      analysisConfig: { ...workspace.analysisConfig, controlGroup: "" },
+      analysisConfig: { ...workspace.analysisConfig, controlGroup: "", relativeToControlEnabled: false },
       controlGroupTouched: false,
     };
   } else if (action.type === "rename-active-plate") {
@@ -196,7 +220,7 @@ export function transitionPlateWorkspace(workspace: PlateWorkspace, action: Plat
   } else if (action.type === "select-wells") {
     next = { ...workspace, selectedWellIds: new Set(action.wellIds), selectionAnchor: action.anchor };
   } else if (action.type === "replace-active-wells") {
-    next = { ...workspace, plates: workspace.plates.map((plate, index) => index === workspace.activePlateIndex ? replaceWellAnnotations(plate, action.wells) : plate), controlGroupTouched: false, analysisConfig: { ...workspace.analysisConfig, controlGroup: "" } };
+    next = { ...workspace, plates: workspace.plates.map((plate, index) => index === workspace.activePlateIndex ? replaceWellAnnotations(plate, action.wells) : plate), controlGroupTouched: false, analysisConfig: { ...workspace.analysisConfig, controlGroup: "", relativeToControlEnabled: false } };
   } else if (action.type === "update-selected-annotations") {
     next = {
       ...workspace,
@@ -227,6 +251,7 @@ export function readPlateWorkspace(workspace: PlateWorkspace): PlateWorkspaceVie
   const groups = [...new Set(wells.filter((well) => analyzableGroupRoles.includes(well.role)).map((well) => well.group).filter(Boolean))].sort();
   const inferredControlGroup = inferControlGroup(wells, groups);
   const analysis = analyzeCellViability(wells, workspace.analysisConfig);
+  const baselineNormalization = analyzeBaselineNormalization(workspace.plates.map(aggregatePlate), workspace.analysisConfig);
   const useGenericWorkflow = Boolean(activePlate.assayData && (
     activeModuleId !== "cell-viability"
     || activePlate.assayData.standardCurves.length
@@ -275,6 +300,7 @@ export function readPlateWorkspace(workspace: PlateWorkspace): PlateWorkspaceVie
     groups,
     inferredControlGroup,
     analysis,
+    baselineNormalization,
     useGenericWorkflow,
     workflowReady,
     selectedWells,

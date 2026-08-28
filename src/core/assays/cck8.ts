@@ -153,7 +153,7 @@ export function analyzeCellViability(wells: WellRecord[], config: AnalysisConfig
     }
   }
   const biologicalSummaries = baseSummaries.map((summary) => {
-    const control = config.controlGroup ? controlByTimepoint.get(summary.timepoint) : undefined;
+    const control = config.relativeToControlEnabled && config.controlGroup ? controlByTimepoint.get(summary.timepoint) : undefined;
     if (!control || control.correctedMean <= 0) return summary;
     const scale = 100 / control.correctedMean;
     return {

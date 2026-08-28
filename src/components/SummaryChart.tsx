@@ -37,9 +37,14 @@ export function SummaryChart({ rows, normalized, compact = false, errorMetric = 
   const top = compact ? 34 : 32;
   const bottom = compact ? 38 : 42;
   const plotHeight = height - top - bottom;
+  const dataMinimum = Math.min(...points.map((point) => point.value - Math.max(0, point.error ?? 0)), 0);
   const dataMaximum = Math.max(...points.map((point) => point.value + Math.max(0, point.error ?? 0)), normalized ? 100 : 0);
-  const maximum = dataMaximum > 0 ? dataMaximum * 1.2 : 1;
-  const y = (value: number) => top + (1 - value / maximum) * plotHeight;
+  const rawRange = Math.max(1e-12, dataMaximum - dataMinimum);
+  const minimum = dataMinimum < 0 ? dataMinimum - rawRange * 0.12 : 0;
+  const maximum = dataMaximum > 0 ? dataMaximum + rawRange * 0.12 : 1;
+  const domainRange = maximum - minimum;
+  const y = (value: number) => top + (maximum - value) / domainRange * plotHeight;
+  const zeroY = y(0);
   const slot = (width - left - 24) / points.length;
   const barWidth = Math.min(compact ? 30 : 42, slot * 0.58);
   const valueLabelGap = 9;
@@ -47,7 +52,7 @@ export function SummaryChart({ rows, normalized, compact = false, errorMetric = 
     <div className="chart-frame">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biological summary chart" style={{ minWidth: width }}>
         {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
-          const value = maximum * fraction;
+          const value = minimum + domainRange * fraction;
           return <g key={fraction}>
             <line x1={left} x2={width - 24} y1={y(value)} y2={y(value)} className="chart-gridline" />
             <text x={left - 8} y={y(value) + 4} textAnchor="end" className="chart-axis-text">{value >= 10 ? value.toFixed(0) : value.toFixed(2)}</text>
@@ -60,11 +65,11 @@ export function SummaryChart({ rows, normalized, compact = false, errorMetric = 
           const barTop = y(point.value);
           const error = Math.max(0, point.error ?? 0);
           const errorTopY = y(point.value + error);
-          const errorBottomY = y(Math.max(0, point.value - error));
+          const errorBottomY = y(point.value - error);
           const valueLabelY = Math.max(12, errorTopY - valueLabelGap);
           return <g key={point.row.key}>
             <title>{`${index + 1}. ${point.label}`}</title>
-            <rect x={center - barWidth / 2} y={barTop} width={barWidth} height={height - bottom - barTop} rx="4" className="chart-bar" />
+            <rect x={center - barWidth / 2} y={Math.min(barTop, zeroY)} width={barWidth} height={Math.abs(zeroY - barTop)} rx="4" className="chart-bar" />
             {error > 0 ? <>
               <line x1={center} x2={center} y1={errorTopY} y2={errorBottomY} className="chart-error" />
               <line x1={center - 7} x2={center + 7} y1={errorTopY} y2={errorTopY} className="chart-error" />

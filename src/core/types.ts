@@ -165,6 +165,7 @@ export type WellRecord = {
 };
 
 export type ParsedPlate = {
+  plateId?: string;
   metadata: PlateMetadata;
   rows: number;
   columns: number;
@@ -175,8 +176,80 @@ export type ParsedPlate = {
 
 export type AnalysisConfig = {
   controlGroup: string;
+  relativeToControlEnabled?: boolean;
   technicalCvThresholdPercent: number;
   blankCvThresholdPercent: number;
+  baselineNormalization?: BaselineNormalizationConfig;
+};
+
+export type BaselineNormalizationMethod = "auto" | "matched-replicate-ratio" | "ratio-of-means" | "fixed-baseline-scaling";
+export type BaselineNormalizationConfig = {
+  enabled: boolean;
+  plateSelectionMode: "all" | "selected";
+  participatingPlateIds: string[];
+  baselineTimepoint: string;
+  scope: "within-group" | "reference-group";
+  referenceGroup: string;
+  method: BaselineNormalizationMethod;
+  scale: "fold" | "percent";
+  uncertaintyDisplay: "sem" | "ci95";
+};
+
+export type NormalizationReadyRow = {
+  plateId: string;
+  plateName: string;
+  sourceFileName: string;
+  sampleId: string;
+  group: string;
+  treatment: string;
+  concentration: string;
+  timepoint: string;
+  biologicalReplicate: string;
+  nTechnical: number;
+  wells: string[];
+  blankMean: number;
+  blankCorrectedBiologicalValue: number;
+  baselineCandidate: boolean;
+  groupOriginalMean: number | null;
+  groupOriginalSd: number | null;
+  groupOriginalSem: number | null;
+  groupOriginalN: number;
+};
+
+export type NormalizedResultRow = {
+  key: string;
+  group: string;
+  treatment: string;
+  concentration: string;
+  timepoint: string;
+  baselineGroup: string;
+  baselineTimepoint: string;
+  method: Exclude<BaselineNormalizationMethod, "auto">;
+  pairingStatus: "matched" | "paired-covariance" | "unpaired" | "fixed-reference" | "definitional-baseline";
+  scale: "fold" | "percent";
+  normalizedMean: number;
+  normalizedSd: number | null;
+  normalizedSem: number | null;
+  propagatedSe: number | null;
+  ci95Low: number | null;
+  ci95High: number | null;
+  n: number;
+  baselineOriginalMean: number;
+  baselineOriginalSd: number | null;
+  baselineOriginalSem: number | null;
+  baselineN: number;
+  uncertaintyMethod: "replicate-ratio-sd-sem" | "delta-method-paired-covariance" | "delta-method-propagated-se" | "fixed-denominator-scaling" | "definitional-zero";
+  warnings: string[];
+  plateNames: string[];
+  plateIds: string[];
+};
+
+export type BaselineNormalizationResult = {
+  status: "disabled" | "ready" | "blocked";
+  config: BaselineNormalizationConfig;
+  normalizationReadyRows: NormalizationReadyRow[];
+  normalizedRows: NormalizedResultRow[];
+  findings: QcFinding[];
 };
 
 export type QcSeverity = "error" | "warning" | "info";

@@ -30,7 +30,8 @@ describe("versioned reproducible artifact module", () => {
     expect(JSON.parse(artifact.content)).toMatchObject({ schemaVersion: projectSchemaVersion, tool: toolIdentity });
     expect(restored.sourceKind).toBe("project-file");
     expect(restored.experiment).toEqual(experiment);
-    expect(restored.restoredAnalysisConfig).toEqual(config);
+    expect(restored.restoredAnalysisConfig).toMatchObject(config);
+    expect(restored.restoredAnalysisConfig?.baselineNormalization?.enabled).toBe(false);
     expect(restored.restoredActiveModuleId).toBe("cell-viability");
     expect(restored.plates[0].wells[0]).toMatchObject({ rawValue: 0, role: "control", group: "Control", notes: "confirmed" });
     expect(restored.plates[0].metadata).toMatchObject({ reopenedFromProjectFile: "round-trip.json", assayAssignmentDecision: "project-restored" });
@@ -39,5 +40,30 @@ describe("versioned reproducible artifact module", () => {
   it("rejects unrelated or unsupported JSON instead of guessing", () => {
     expect(() => parseProjectArtifact("{}", "empty.json")).toThrow(/版本不受支持/);
     expect(() => parseProjectArtifact("not json", "broken.json")).toThrow(/不是有效的 JSON/);
+  });
+
+  it("opens schema v2 projects with normalization safely disabled", () => {
+    const plate = parsePastedPlateReadings(matrix, {
+      assayModuleId: "cell-viability",
+      assayMethodLabel: "CCK-8",
+      detectionMode: "absorbance",
+      signalUnit: "OD",
+      wavelengthNm: 450,
+    }).plates[0];
+    const artifact = createArtifact({
+      kind: "project",
+      plates: [plate],
+      experiment: { name: "Legacy", operator: "", date: "", notes: "" },
+      activeModuleId: "cell-viability",
+      analysisConfig: config,
+    });
+    const legacy = JSON.parse(artifact.content);
+    legacy.schemaVersion = 2;
+    delete legacy.analysisConfig.baselineNormalization;
+    delete legacy.analysisConfig.relativeToControlEnabled;
+
+    const restored = parseProjectArtifact(JSON.stringify(legacy), "legacy-v2.json");
+    expect(restored.restoredAnalysisConfig?.baselineNormalization?.enabled).toBe(false);
+    expect(restored.restoredAnalysisConfig?.relativeToControlEnabled).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadArtifact, downloadBlob, downloadTextFile } from "./adapters/browser-download";
 import { createArtifact, toolIdentity } from "./core/artifacts";
 import { assayModules, detectedAssayModule, getAssayWorkflow } from "./core/assay-workflows";
+import { defaultBaselineNormalizationConfig } from "./core/baseline-normalization";
 import { importPlateReadings } from "./core/import";
 import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
 import { currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText, type LayoutPatch } from "./core/layout";
@@ -14,7 +15,7 @@ import {
   workspacePlates,
   type PlateWorkspace as PlateWorkspaceState,
 } from "./core/plate-workspace";
-import type { AssayModuleId, BiologicalSummary, DetectionMode, ParsedPlate, PlateImportBatch, WellRole } from "./core/types";
+import type { AssayModuleId, BaselineNormalizationConfig, BiologicalSummary, DetectionMode, ParsedPlate, PlateImportBatch, WellRole } from "./core/types";
 import { PlateMap } from "./components/PlateMap";
 import { SummaryChart } from "./components/SummaryChart";
 import { AssayDataExplorer } from "./components/AssayDataExplorer";
@@ -209,6 +210,31 @@ export default function App() {
   const groups = workspaceView?.groups ?? [];
   const inferredControlGroup = workspaceView?.inferredControlGroup ?? "";
   const analysis = workspaceView?.analysis ?? { ready: false, blankMean: null, blankSd: null, blankCvPercent: null, annotatedWells: [], technicalSummaries: [], biologicalSummaries: [], significanceComparisons: [], findings: [] };
+  const baselineNormalization = workspaceView?.baselineNormalization ?? { status: "disabled" as const, config: defaultBaselineNormalizationConfig, normalizationReadyRows: [], normalizedRows: [], findings: [] };
+  const normalizationConfig = config.baselineNormalization ?? defaultBaselineNormalizationConfig;
+  const normalizationTimepoints = [...new Set(baselineNormalization.normalizationReadyRows.map((row) => row.timepoint).filter(Boolean))];
+  const normalizationGroups = [...new Set(baselineNormalization.normalizationReadyRows.map((row) => row.group).filter(Boolean))];
+  const displayedBaselineNormalization = selectedSummaryKeys.size ? {
+    ...baselineNormalization,
+    normalizationReadyRows: baselineNormalization.normalizationReadyRows.filter((row) => selectedSummaryKeys.has([row.group, row.treatment, row.concentration, row.timepoint].join("¦"))),
+    normalizedRows: baselineNormalization.normalizedRows.filter((row) => selectedSummaryKeys.has(row.key)),
+  } : baselineNormalization;
+  const normalizedChartRows = displayedBaselineNormalization.status === "ready" ? displayedBaselineNormalization.normalizedRows.map((row) => ({
+    key: row.key,
+    group: row.group,
+    treatment: row.treatment,
+    concentration: row.concentration,
+    timepoint: row.timepoint,
+    nBiological: row.n,
+    correctedMean: row.normalizedMean,
+    correctedSd: row.normalizedSd,
+    correctedSem: normalizationConfig.uncertaintyDisplay === "ci95" && row.ci95Low !== null && row.ci95High !== null
+      ? (row.ci95High - row.ci95Low) / 2
+      : row.normalizedSem ?? row.propagatedSe,
+    relativeActivityPercent: null,
+    relativeSdPercent: null,
+    relativeSemPercent: null,
+  })) : [];
   const useGenericWorkflow = workspaceView?.useGenericWorkflow ?? false;
   const workflowReady = workspaceView?.workflowReady ?? false;
   const roleCounts = useMemo(() => Object.fromEntries(wellRoles.map((role) => [role, wells.filter((well) => well.role === role).length])) as Record<WellRole, number>, [wells]);
@@ -525,10 +551,19 @@ export default function App() {
     setNotice("当前板布局已导出；文件仅包含孔位注释，不包含原始读数和分析结果。");
   }
 
-  function exportFiles(kind: "wells" | "technical" | "biological" | "package") {
+  function exportFiles(kind: "wells" | "technical" | "biological" | "package" | "normalization-ready" | "normalized") {
     if (!plate) return;
     if (kind === "package") {
-      downloadArtifact(createArtifact({ kind: "analysis-package", plate, wells, analysisConfig: config, result: analysis }));
+      downloadArtifact(createArtifact({ kind: "analysis-package", plate, plates, wells, analysisConfig: config, result: analysis, normalizationResult: baselineNormalization }));
+      return;
+    }
+    if (kind === "normalization-ready" || kind === "normalized") {
+      downloadArtifact(createArtifact({
+        kind: kind === "normalized" ? "normalized-results" : "normalization-ready",
+        plates,
+        result: kind === "normalization-ready" ? baselineNormalization : displayedBaselineNormalization,
+        sourceName: experiment.name || plate.metadata.sourceFileName,
+      }));
       return;
     }
     const artifactKind = kind === "wells" ? "annotated-wells" : kind === "technical" ? "technical-summary" : "biological-summary";
@@ -543,6 +578,10 @@ export default function App() {
   function updateAnalysisConfig(patch: Partial<typeof config>, touched = controlGroupTouched) {
     if (!workspace) return;
     setWorkspace(transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...config, ...patch }, touched }));
+  }
+
+  function updateBaselineNormalization(patch: Partial<BaselineNormalizationConfig>) {
+    updateAnalysisConfig({ baselineNormalization: { ...normalizationConfig, ...patch } });
   }
 
   return <div className="app-shell">
@@ -768,12 +807,39 @@ export default function App() {
         </div>
         <div className="analysis-layout-compact">
           <aside className="panel analysis-side-panel">
-            <div className="panel-head compact-panel-head"><div><h3>分析设置</h3><p>对照组和 QC 阈值只影响归一化、显著性和复核提示。</p></div></div>
+            <div className="panel-head compact-panel-head"><div><h3>分析设置</h3><p>显著性参考、显示变换与 QC 阈值彼此独立。</p></div></div>
             <div className="side-control-grid">
-              <Field label="对照组"><select value={config.controlGroup} onChange={(event) => updateAnalysisConfig({ controlGroup: event.target.value }, true)}><option value="">不做相对对照归一化</option>{groups.map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="field-help">{config.controlGroup ? `当前将各 group 与 ${config.controlGroup} 比较。${!controlGroupTouched && inferredControlGroup === config.controlGroup ? "系统已根据 role=control 自动识别。" : ""}` : inferredControlGroup ? `检测到可能的对照组 ${inferredControlGroup}；可手动选择启用比较。` : "选择对照组后，自动生成 group vs control 的显著性比较。"}</small></Field>
+              <Field label="显著性参考组"><select value={config.controlGroup} onChange={(event) => updateAnalysisConfig({ controlGroup: event.target.value, relativeToControlEnabled: event.target.value ? config.relativeToControlEnabled : false }, true)}><option value="">不做组间显著性比较</option>{groups.map((group) => <option key={group} value={group}>{group}</option>)}</select><small className="field-help">{config.controlGroup ? `显著性将各 group 与 ${config.controlGroup} 比较。${!controlGroupTouched && inferredControlGroup === config.controlGroup ? "系统已根据 role=control 识别，可手动更改。" : ""}` : inferredControlGroup ? `检测到可能的对照组 ${inferredControlGroup}；选择后才启用比较。` : "该选择不会自动改变图表尺度。"}</small></Field>
+              <label className="check-row compact-check"><input type="checkbox" checked={Boolean(config.relativeToControlEnabled)} disabled={!config.controlGroup} onChange={(event) => updateAnalysisConfig({ relativeToControlEnabled: event.target.checked })} />固定参考组缩放到同时间点对照 (%)</label>
+              {config.relativeToControlEnabled ? <p className="field-help">Fixed-reference scaling：把对照组均值视为无误差常数，SD/SEM 仅按该常数缩放，不传播分母不确定性。</p> : null}
               <Field label="技术复孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.technicalCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ technicalCvThresholdPercent: Number(event.target.value) })} /></Field>
               <Field label="空白孔 CV 阈值 (%)"><input type="number" min="0" step="1" value={config.blankCvThresholdPercent} onChange={(event) => updateAnalysisConfig({ blankCvThresholdPercent: Number(event.target.value) })} /></Field>
             </div>
+            <details className="baseline-normalization-controls">
+              <summary><span>Baseline normalization</span><em>{normalizationConfig.enabled ? baselineNormalization.status : "默认关闭"}</em></summary>
+              <div className="baseline-normalization-body">
+                <label className="check-row compact-check"><input type="checkbox" checked={normalizationConfig.enabled} onChange={(event) => updateBaselineNormalization({ enabled: event.target.checked })} />启用派生标准化</label>
+                <Field label="Baseline timepoint"><select value={normalizationConfig.baselineTimepoint} onChange={(event) => updateBaselineNormalization({ baselineTimepoint: event.target.value })}><option value="">请选择精确时间点</option>{normalizationTimepoints.map((timepoint) => <option key={timepoint} value={timepoint}>{timepoint}</option>)}</select></Field>
+                <Field label="标准化范围"><select value={normalizationConfig.scope} onChange={(event) => updateBaselineNormalization({ scope: event.target.value as BaselineNormalizationConfig["scope"] })}><option value="within-group">每组归一到自身 baseline</option><option value="reference-group">全部归一到参考组 baseline</option></select></Field>
+                {normalizationConfig.scope === "reference-group" ? <Field label="Baseline reference group"><select value={normalizationConfig.referenceGroup} onChange={(event) => updateBaselineNormalization({ referenceGroup: event.target.value })}><option value="">请选择参考组</option>{normalizationGroups.map((group) => <option key={group} value={group}>{group}</option>)}</select></Field> : null}
+                <Field label="计算方法"><select value={normalizationConfig.method} onChange={(event) => updateBaselineNormalization({ method: event.target.value as BaselineNormalizationConfig["method"] })}><option value="auto">Auto · 优先匹配 Bio ID</option><option value="matched-replicate-ratio">Matched replicate ratios</option><option value="ratio-of-means">Ratio of means + propagated SE</option><option value="fixed-baseline-scaling">Fixed baseline scaling · advanced</option></select></Field>
+                <Field label="输出尺度"><select value={normalizationConfig.scale} onChange={(event) => updateBaselineNormalization({ scale: event.target.value as BaselineNormalizationConfig["scale"] })}><option value="fold">Fold · baseline = 1</option><option value="percent">Percent · baseline = 100</option></select></Field>
+                <Field label="图中不确定性"><select value={normalizationConfig.uncertaintyDisplay} onChange={(event) => updateBaselineNormalization({ uncertaintyDisplay: event.target.value as BaselineNormalizationConfig["uncertaintyDisplay"] })}><option value="ci95">95% CI</option><option value="sem">SEM</option></select></Field>
+                <div className="normalization-plate-scope"><strong>参与板</strong>{plates.map((candidate) => {
+                  const plateId = candidate.plateId;
+                  const explicit = normalizationConfig.plateSelectionMode === "selected";
+                  const checked = Boolean(plateId) && (explicit ? normalizationConfig.participatingPlateIds.includes(plateId as string) : true);
+                  return <label key={plateId ?? `${candidate.metadata.sourceFileName}-${candidate.metadata.plateName}`}><input type="checkbox" disabled={!plateId} checked={checked} onChange={(event) => {
+                    if (!plateId) return;
+                    const current = explicit ? normalizationConfig.participatingPlateIds : plates.flatMap((item) => item.plateId ? [item.plateId] : []);
+                    const next = event.target.checked ? [...new Set([...current, plateId])] : current.filter((id) => id !== plateId);
+                    updateBaselineNormalization({ plateSelectionMode: "selected", participatingPlateIds: next });
+                  }} />{candidate.metadata.plateName}</label>;
+                })}</div>
+                <p className="field-help">先逐板扣 blank、再合并同一 Bio 内技术孔。显著性仍使用 blank-corrected biological-replicate values。Matched ratio 只适用于项目中保留了明确 Bio ID 的孔级数据；仅有 mean/SD/SEM 的汇总表不能重建 replicate-level ratio。</p>
+                {baselineNormalization.findings.length ? <ul className="normalization-findings">{baselineNormalization.findings.map((finding, index) => <li key={`${finding.code}-${index}`} className={finding.severity}><strong>{finding.code}</strong>{finding.message}</li>)}</ul> : null}
+              </div>
+            </details>
             <div className={`qc-compact-block ${analysis.findings.length ? "has-findings" : "clear"}`}>
               <div className="side-section-title"><strong>质量控制</strong><span>{analysis.findings.length ? `${analysis.findings.length} 条` : "无需复核"}</span></div>
               {analysis.findings.length ? <ul className="qc-mini-list">{analysis.findings.map((finding, index) => <li key={`${finding.code}-${index}`} className={finding.severity} onClick={() => finding.wells.length && updatePlateSelection(new Set(finding.wells), finding.wells.at(-1) ?? null)}><span>{finding.severity}</span><div><strong>{finding.code}</strong><p title={finding.message}>{finding.message}</p>{finding.wells.length ? <small title={finding.wells.join(", ")}>{finding.wells.slice(0, 8).join(", ")}{finding.wells.length > 8 ? "…" : ""}</small> : null}</div></li>)}</ul> : null}
@@ -788,6 +854,8 @@ export default function App() {
                 <button type="button" className="secondary-button mini" disabled={!displayedAnnotatedWells.length} onClick={() => exportFiles("wells")}>孔级 CSV</button>
                 <button type="button" className="secondary-button mini" disabled={!displayedTechnicalSummaries.length} onClick={() => exportFiles("technical")}>技术复孔 CSV</button>
                 <button type="button" className="secondary-button mini" disabled={!displayedBiologicalSummaries.length} onClick={() => exportFiles("biological")}>汇总 CSV</button>
+                <button type="button" className="secondary-button mini" title="始终导出完整项目范围及 QC 状态，确保后续时间点包含其 baseline 依赖。" disabled={!baselineNormalization.normalizationReadyRows.length} onClick={() => exportFiles("normalization-ready")}>标准化准备表</button>
+                <button type="button" className="secondary-button mini" disabled={displayedBaselineNormalization.status !== "ready" || !displayedBaselineNormalization.normalizedRows.length} onClick={() => exportFiles("normalized")}>标准化结果</button>
               </div>
             </div>
             <div className="table-scroll summary-table-scroll"><table className="clickable-table"><thead><tr><th>显示</th>{summaryTableColumns.map((column) => <th key={column.key}>{column.header}</th>)}</tr></thead><tbody>{analysis.biologicalSummaries.length ? analysis.biologicalSummaries.map((row) => {
@@ -798,10 +866,14 @@ export default function App() {
                 {summaryTableColumns.map((column) => <td key={column.key}>{column.render(row)}</td>)}
               </tr>;
             }) : <tr><td colSpan={summaryTableColumns.length + 1} className="empty-cell">尚无可汇总数据。</td></tr>}</tbody></table></div>
+            {normalizationConfig.enabled ? <div className="normalization-preview">
+              <div><strong>Calculated in Studio · baseline normalization</strong><span className={`readiness ${baselineNormalization.status === "ready" ? "ready" : "review"}`}>{baselineNormalization.status}</span></div>
+              {baselineNormalization.status === "ready" ? <div className="table-scroll compact"><table><thead><tr><th>Group</th><th>Time</th><th>Baseline</th><th>Method</th><th>Uncertainty</th><th>n</th><th>Normalized mean</th><th>SD</th><th>SEM / propagated SE</th><th>95% CI</th><th>Method warning</th></tr></thead><tbody>{displayedBaselineNormalization.normalizedRows.map((row) => <tr key={row.key}><td>{row.group}</td><td>{row.timepoint}</td><td>{row.baselineGroup} · {row.baselineTimepoint}</td><td>{row.method}</td><td>{row.uncertaintyMethod}</td><td>{row.n}</td><td>{format(row.normalizedMean)}</td><td>{format(row.normalizedSd)}</td><td>{format(row.normalizedSem ?? row.propagatedSe)}</td><td>{row.ci95Low === null || row.ci95High === null ? "未计算" : `${format(row.ci95Low)}–${format(row.ci95High)}`}</td><td>{row.warnings.length ? row.warnings.join(" ") : "—"}</td></tr>)}</tbody></table></div> : <p>标准化结果暂不可用；请按左侧提示复核 baseline、板兼容性和 Bio ID。</p>}
+            </div> : null}
           </section>
 
           <aside className="analysis-result-side">
-            <div className="panel chart-panel compact-chart-panel"><div className="panel-head compact-panel-head"><div><h3>图表预览</h3><p>辅助查看趋势；正式结果以左侧汇总表和统计表为准。</p></div></div><SummaryChart rows={displayedBiologicalSummaries} normalized={Boolean(config.controlGroup)} compact yAxisLabel={`Blank-corrected signal${plate.metadata.signalUnit ? ` (${plate.metadata.signalUnit})` : ""}`} /></div>
+            <div className="panel chart-panel compact-chart-panel"><div className="panel-head compact-panel-head"><div><h3>图表预览</h3><p>{baselineNormalization.status === "ready" ? `派生标准化 · ${baselineNormalization.config.method} · ${baselineNormalization.config.uncertaintyDisplay === "ci95" ? "95% CI" : "SEM"} · baseline ${baselineNormalization.config.scale === "percent" ? "100" : "1"}` : config.relativeToControlEnabled ? "相对同时间点对照的显示变换。" : "Blank-corrected primary result。"}</p></div></div><SummaryChart rows={baselineNormalization.status === "ready" ? normalizedChartRows : displayedBiologicalSummaries} normalized={baselineNormalization.status === "ready" ? false : Boolean(config.relativeToControlEnabled && config.controlGroup)} compact yAxisLabel={baselineNormalization.status === "ready" ? `Normalized ${baselineNormalization.config.scale}` : `Blank-corrected signal${plate.metadata.signalUnit ? ` (${plate.metadata.signalUnit})` : ""}`} /></div>
             <div className="panel table-panel significance-panel"><div className="panel-head compact-panel-head"><div><h3>显著性</h3><p>{selectedSummaryKeys.size ? "按当前点选行重新计算；自动加入同时间点 control 与 blank。" : "全表范围计算；单位是生物学重复，不把技术复孔当作独立 n。"}</p></div></div><div className="method-note"><strong>计算方法</strong><p>先扣除 blank，再合并同一 biological replicate 内的技术复孔。若处理组和对照组共享相同 B 编号，使用配对 t-test；无法配对时使用 Welch t-test。P 值用当前范围内的 Benjamini-Hochberg FDR 校正，星号按 FDR 标注。</p><p>推荐原则：单时间点两组比较用配对/独立 t-test；多处理组优先用 ANOVA + Dunnett 或 FDR；连续多时间点应考虑 two-way ANOVA 或混合效应模型。</p></div><div className="table-scroll compact"><table><thead><tr><th>Contrast</th><th>Method</th><th>n</th><th>Diff</th><th>P</th><th>FDR</th><th>Sig.</th></tr></thead><tbody>{displayedSignificanceComparisons.length ? displayedSignificanceComparisons.map((row) => <tr key={row.key}><td>{row.contrast}</td><td>{significanceMethodLabel(row.note)}</td><td>{row.nGroup}/{row.nControl}</td><td>{Number.isFinite(row.meanDifference) ? format(row.meanDifference) : "未计算"}</td><td>{row.pValue === null ? "n/a" : row.pValue.toPrecision(3)}</td><td>{row.adjustedPValue === null ? "n/a" : row.adjustedPValue.toPrecision(3)}</td><td>{row.label}</td></tr>) : <tr><td colSpan={7} className="empty-cell">{config.controlGroup ? "当前展示范围没有可比较的非对照组。" : "选择对照组后计算显著性。"}</td></tr>}</tbody></table></div></div>
           </aside>
         </div>
