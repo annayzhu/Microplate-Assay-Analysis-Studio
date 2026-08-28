@@ -394,8 +394,8 @@ main { padding-bottom: 40px; }
 .summary-panel-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; }
 .summary-panel-head > div:first-child { min-width: 0; }
 .summary-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--ln-space-2); max-width: 520px; }
-.summary-head-actions .secondary-button { white-space: nowrap; }
-.secondary-button.mini { min-height: var(--ln-control-height-xs); padding: var(--ln-space-2) 9px; border-radius: var(--ln-radius-sm); font-size: var(--ln-font-size-sm); }
+.summary-head-actions .primary-button,.summary-head-actions .secondary-button { white-space: nowrap; }
+.primary-button.mini,.secondary-button.mini { min-height: var(--ln-control-height-xs); padding: var(--ln-space-2) 9px; border-radius: var(--ln-radius-sm); font-size: var(--ln-font-size-sm); }
 .summary-table-scroll table { min-width: 760px; }
 .summary-table-scroll th:first-child,.summary-table-scroll td:first-child { width: 52px; text-align: center; }
 .summary-table-scroll th:nth-child(2) { min-width: 116px; }
@@ -525,6 +525,7 @@ main { padding-bottom: 40px; }
 .side-section-title span,
 .plate-legend,
 .analysis-summary-strip span,
+.primary-button.mini,
 .secondary-button.mini {
   font-size: var(--ln-font-size-lg);
 }

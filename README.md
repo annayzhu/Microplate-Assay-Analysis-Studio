@@ -1,6 +1,6 @@
 # Microplate Assay Studio
 
-面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.6.2，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
+面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.6.3，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
 
 ## 工具定位
 
@@ -21,7 +21,7 @@
 6. 支持 CCK-8/MTT/Resazurin/alamarBlue、BSA 蛋白定量与光谱、ATP 发光定量和 Dual-Luciferase demo 流程。
 7. 对 CCK-8 类组间实验，区分技术复孔与生物学重复，完成空白扣除、QC、对照归一化及显著性分析；同一块板允许存在多个独立的生物学重复，但技术复孔仍先在各自生物学重复内汇总。
 8. 对 ATP、BSA、alamarBlue 标准曲线和 Dual-Luciferase，逐步展示 SkanIt 原始测量与仪器计算结果，不擅自替换仪器算法。
-9. 导出包含当前孔注释、模块确认、选择决策、来源适配器、测量步骤和全部数据点的 tidy long-table CSV；CCK-8 流程另可导出孔级、技术复孔和生物学汇总结果。汇总 CSV 只保留明确命名的 `blank_corrected_*` 基础列和 `relative_to_control_*` 派生列，不设置重复的通用 `value / sd / sem` 别名。
+9. 导出包含当前孔注释、模块确认、选择决策、来源适配器、测量步骤和全部数据点的 tidy long-table CSV；细胞活性/增殖流程可导出结果 Excel，其中整合导出说明、生物学汇总、孔级数据和可读板布局。技术复孔仍作为统计计算的内部中间层，但不再提供单独下载文件。汇总 CSV 只保留明确命名的 `blank_corrected_*` 基础列和 `relative_to_control_*` 派生列，不设置重复的通用 `value / sd / sem` 别名。
 10. 可保存并重新打开浏览器本地的可复现项目文件，恢复原始读值、当前注释、实验基本信息、模块识别/确认和分析配置。
 11. 无仪器原始文件时，可直接粘贴 Excel 中的固定孔板矩阵，或下载并填写 6/12/24/48/96/384 孔读数模板后导入。
 12. 同一次粘贴或模板导入可识别多块板；每块板保留独立名称、注释和分析状态，不会自动合并为生物学重复。
@@ -75,6 +75,7 @@ npm test
 - 板图框选、追加选择、逐孔取消、缩放、批量草稿保留与离开保护。
 - 当前板布局导出、CSV 引号回读、跨板型预警、生物学重复清空选项及原始读数只读保护。
 - CCK-8 的空白扣除、技术复孔合并、生物学汇总，以及未归一化主值与相对 Control 派生列的导出边界。
+- 结果 Excel 的导出说明、生物学汇总、孔级数据和板布局工作表，以及点选范围、来源字段与下载回读。
 - 跨时间点 baseline normalization 的逐板 blank correction、精确 baseline 选择、Bio 匹配/回退规则、误差传播、异常基线门控、CSV 导出和项目文件往返恢复。
 - 同一块板多个生物学重复的统计层级，以及疑似把技术复孔误填为生物学重复时的提示。
 - 模块能力状态、识别/确认决策、带来源信息的 CSV 导出和可复现项目文件往返恢复。
@@ -113,6 +114,7 @@ npm run test:unit
 - `src/core/import.ts`：统一导入 interface；浏览器 `File` 与测试内存文件都通过相同 seam。
 - `src/core/instruments/registry.ts`：厂商格式 adapters、格式探测和结构化诊断。
 - `src/core/artifacts.ts`：版本化 project、分析包及 CSV artifact 的单一 schema/version 来源。
+- `src/core/result-workbook.ts`：结果 Excel 的工作表 schema、板布局矩阵和可读格式。
 - `src/adapters/browser-download.ts`：浏览器下载副作用，不包含科研计算。
 - `scripts/acceptance-harness.mjs`：在线与离线页面测试共用的浏览器 adapter、fixture 和断言工具。
 - `CONTEXT.md`：领域词汇；`docs/adr/`：需要长期保留的架构决策。
