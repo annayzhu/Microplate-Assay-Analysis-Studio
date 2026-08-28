@@ -48,7 +48,7 @@ function normalizationPlate(name, timepoint, blank, values) {
 const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
 await writeFile(normalizationProjectPath, JSON.stringify({
   schemaVersion: 3,
-  tool: { id: "microplate-assay-studio", version: "0.6.0" },
+  tool: { id: "microplate-assay-studio", version: "0.6.1" },
   generatedAt: new Date(0).toISOString(),
   experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
   activeModuleId: "cell-viability",
@@ -102,11 +102,7 @@ try {
     throw new Error(`Global content frames are not aligned: left ${frameLefts.join(", ")}; right ${frameRights.join(", ")}.`);
   }
   if (!headerFrame || !assayFrame || !workspaceFrame) throw new Error("Unable to verify global content frame alignment.");
-  const workflowSummaryPadding = await workflowDisclosure.locator("summary").evaluate((element) => getComputedStyle(element).paddingLeft);
-  const experimentSummaryPadding = await page.locator(".experiment-record summary").evaluate((element) => getComputedStyle(element).paddingLeft);
-  if (workflowSummaryPadding !== experimentSummaryPadding) {
-    throw new Error(`Import disclosures do not share one text rail: ${workflowSummaryPadding} vs ${experimentSummaryPadding}.`);
-  }
+  if (await page.getByText("实验记录信息", { exact: true }).count()) throw new Error("Removed experiment-record strip returned to the import workspace.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-global-frame-wide.png"), fullPage: true });
   await page.setViewportSize({ width: 320, height: 800 });
   const mobileImportOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -320,6 +316,17 @@ try {
     const importedText = await page.locator("body").innerText();
     requiredImportSignals = ["本次实验基本信息", "CCK-8 / WST-8", "吸光", "450 nm", "96 个已测孔"];
     assertSignals(importedText, requiredImportSignals, "Instrument import");
+    const reviewButton = page.getByRole("button", { name: "核对实验方法" });
+    if (!await reviewButton.isVisible()) throw new Error("Inferred assay method does not expose a review action.");
+    await reviewButton.click();
+    const methodReview = page.getByLabel("实验方法复核");
+    await methodReview.getByLabel("确认方法").fill("CCK-8 / WST-8 · 人工确认");
+    await methodReview.getByRole("button", { name: "确认方法" }).click();
+    if (!await page.getByRole("button", { name: "已复核 · 修改" }).isVisible()) throw new Error("Assay method review did not reach a confirmed state.");
+    const reviewedOverview = await page.locator(".experiment-overview").innerText();
+    for (const signal of ["CCK-8 / WST-8 · 人工确认", "原始识别：CCK-8 / WST-8"]) {
+      if (!reviewedOverview.includes(signal)) throw new Error(`Reviewed assay provenance is missing: ${signal}`);
+    }
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-imported.png"), fullPage: true });
     await page.getByRole("button", { name: "进入板图与注释" }).click();
     const layoutText = await page.locator("body").innerText();

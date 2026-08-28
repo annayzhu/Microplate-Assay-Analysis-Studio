@@ -146,6 +146,15 @@ export function assignmentDecision(
 
 export type WorkflowFact = { label: string; value: string; evidence: "instrument" | "user" | "missing" };
 
+function reviewedMethodLabel(plate: ParsedPlate): string {
+  return plate.metadata.confirmedAssayMethodLabel ?? plate.metadata.assayMethodLabel;
+}
+
+function methodEvidence(plate: ParsedPlate): WorkflowFact["evidence"] {
+  if (plate.metadata.assayMethodReviewDecision === "user-confirmed" || plate.metadata.assayMethodEvidence === "user-reported") return "user";
+  return plate.metadata.assayMethodEvidence === "unknown" ? "missing" : "instrument";
+}
+
 function countSeries(plate: ParsedPlate, predicate: (name: string) => boolean): number {
   return plate.assayData?.measurements.filter((series) => predicate(series.name)).length ?? 0;
 }
@@ -157,7 +166,7 @@ export function assayWorkflowFacts(plate: ParsedPlate, moduleId: AssayModuleId):
     const curves = dataset?.standardCurves.length ?? 0;
     const calculated = dataset?.measurements.filter((series) => series.source === "instrument-calculated").length ?? 0;
     return [
-      { label: "定量方法", value: plate.metadata.assayMethodLabel || "未确认", evidence: plate.metadata.assayMethodEvidence === "user-reported" ? "user" : "instrument" },
+      { label: "定量方法", value: reviewedMethodLabel(plate) || "未确认", evidence: methodEvidence(plate) },
       { label: "标准曲线", value: curves ? `${curves} 条仪器曲线` : "未提供", evidence: curves ? "instrument" : "missing" },
       { label: "仪器计算步骤", value: calculated ? `${calculated} 个` : "未提供", evidence: calculated ? "instrument" : "missing" },
       missing("稀释倍数"),
@@ -185,7 +194,7 @@ export function assayWorkflowFacts(plate: ParsedPlate, moduleId: AssayModuleId):
     ];
   }
   return [
-    { label: "具体方法", value: plate.metadata.assayMethodLabel || "未确认", evidence: plate.metadata.assayMethodEvidence === "user-reported" ? "user" : plate.metadata.assayMethodEvidence === "unknown" ? "missing" : "instrument" },
+    { label: "具体方法", value: reviewedMethodLabel(plate) || "未确认", evidence: methodEvidence(plate) },
     { label: "检测模式", value: plate.metadata.detectionMode, evidence: plate.metadata.assayMethodEvidence === "user-reported" ? "user" : "instrument" },
     { label: "测量步骤", value: dataset?.measurements.length ? `${dataset.measurements.length} 个` : "单一原始读数", evidence: dataset ? "instrument" : "user" },
   ];

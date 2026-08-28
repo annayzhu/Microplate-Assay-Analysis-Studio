@@ -24,6 +24,7 @@ export type AssayModuleDefinition = {
 };
 
 export type AssayAssignmentDecision = "matched" | "system-detected" | "user-confirmed" | "manual" | "project-restored";
+export type AssayMethodReviewDecision = "user-confirmed";
 
 export type PlateMetadata = {
   sourceKind: PlateImportSource;
@@ -33,6 +34,8 @@ export type PlateMetadata = {
   assayMethod: CellViabilityMethod;
   assayMethodLabel: string;
   assayMethodEvidence: MetadataEvidence;
+  confirmedAssayMethodLabel?: string;
+  assayMethodReviewDecision?: AssayMethodReviewDecision;
   detectionMode: DetectionMode;
   signalUnit: string;
   wavelengthNm: number | null;

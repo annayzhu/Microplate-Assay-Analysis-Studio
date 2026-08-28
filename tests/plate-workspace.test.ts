@@ -46,6 +46,31 @@ describe("Plate workspace acceptance scenarios", () => {
     expect(aggregatePlate(aggregate).wells[2].rawValue).toBe(0.5);
   });
 
+  it("stores a reviewed assay method separately from source inference", () => {
+    const inferredPlate = fixturePlate();
+    inferredPlate.metadata = { ...inferredPlate.metadata, assayMethodEvidence: "inferred" };
+    let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch([inferredPlate]), "cell-viability", false));
+    const before = readPlateWorkspace(workspace).activePlate;
+    const rawValues = before.wells.map((well) => well.rawValue);
+    workspace = transitionPlateWorkspace(workspace, { type: "review-active-assay-method", label: "  CCK-8 / WST-8  " });
+    const reviewed = readPlateWorkspace(workspace).activePlate;
+
+    expect(reviewed.metadata.confirmedAssayMethodLabel).toBe("CCK-8 / WST-8");
+    expect(reviewed.metadata.assayMethodReviewDecision).toBe("user-confirmed");
+    expect(reviewed.metadata.assayMethodLabel).toBe(before.metadata.assayMethodLabel);
+    expect(reviewed.wells.map((well) => well.rawValue)).toEqual(rawValues);
+
+    workspace = transitionPlateWorkspace(workspace, { type: "assign-active-assay", moduleId: "protein-quant" });
+    const reassigned = readPlateWorkspace(workspace).activePlate;
+    expect(reassigned.metadata.confirmedAssayMethodLabel).toBeUndefined();
+    expect(reassigned.metadata.assayMethodReviewDecision).toBeUndefined();
+  });
+
+  it("rejects an empty method review instead of creating a meaningless confirmed state", () => {
+    const workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch(), "cell-viability", false));
+    expect(() => transitionPlateWorkspace(workspace, { type: "review-active-assay-method", label: "   " })).toThrow(/填写方法名称/);
+  });
+
   it("produces project-ready plates without exposing duplicate annotation state", () => {
     let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch(), "cell-viability", true));
     workspace = transitionPlateWorkspace(workspace, { type: "rename-active-plate", name: "Day 1" });

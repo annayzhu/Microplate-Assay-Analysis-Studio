@@ -79,7 +79,14 @@ function detectionModeLabel(mode: DetectionMode): string {
 }
 
 function methodEvidenceLabel(plate: ParsedPlate): string {
+  if (plate.metadata.assayMethodReviewDecision === "user-confirmed") {
+    return `人工复核确认 · 原始识别：${plate.metadata.assayMethodLabel || "未提供"}`;
+  }
   return ({ reported: "仪器协议明确记录", "user-reported": "由用户在导入时填写", inferred: "根据通道与当前流程推断，请复核", unknown: "文件未提供" })[plate.metadata.assayMethodEvidence];
+}
+
+function displayedAssayMethodLabel(plate: ParsedPlate): string {
+  return plate.metadata.confirmedAssayMethodLabel ?? plate.metadata.assayMethodLabel;
 }
 
 function measurementChannel(plate: ParsedPlate): string {
@@ -191,6 +198,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [methodReviewOpen, setMethodReviewOpen] = useState(false);
+  const [methodReviewDraft, setMethodReviewDraft] = useState("");
   const selectedModule = assayModules.find((module) => module.id === selectedModuleId) ?? assayModules[0];
   const workspaceView = useMemo(() => workspace ? readPlateWorkspace(workspace) : null, [workspace]);
   const plates = useMemo(() => workspace ? workspacePlates(workspace) : [], [workspace]);
@@ -207,6 +216,9 @@ export default function App() {
   const plateZoom = platePresentation.zoom;
   const activeModuleId = workspaceView?.activeModuleId ?? selectedModuleId;
   const activeModule = workspaceView?.activeModule ?? getAssayWorkflow(activeModuleId);
+  const assayMethodNeedsReview = Boolean(plate
+    && plate.metadata.assayMethodReviewDecision !== "user-confirmed"
+    && (plate.metadata.assayMethodEvidence === "inferred" || plate.metadata.assayMethodEvidence === "unknown"));
   const groups = workspaceView?.groups ?? [];
   const inferredControlGroup = workspaceView?.inferredControlGroup ?? "";
   const analysis = workspaceView?.analysis ?? { ready: false, blankMean: null, blankSd: null, blankCvPercent: null, annotatedWells: [], technicalSummaries: [], biologicalSummaries: [], significanceComparisons: [], findings: [] };
@@ -320,6 +332,7 @@ export default function App() {
       const confirmed = window.confirm(`将当前板从“${activeModule.name}”切换为“${nextModule.name}”。\n\n原始读数和通用孔位注释会保留；旧模块的派生结果将不再作为当前结果展示。是否继续？`);
       if (!confirmed) return;
       setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "assign-active-assay", moduleId }) : current);
+      setMethodReviewOpen(false);
     }
     setSelectedModuleId(moduleId);
     setModuleSelectionTouched(true);
@@ -353,6 +366,7 @@ export default function App() {
     });
     const nextPlates = workspacePlates(nextWorkspace);
     setWorkspace(nextWorkspace);
+    setMethodReviewOpen(false);
     setPlatePresentations(nextPlates.map(() => ({ zoom: 1, zoomManuallyChanged: false })));
     setPendingBatch(null);
     setPendingIncludedPlates(new Set());
@@ -382,6 +396,7 @@ export default function App() {
     clearBatchDraft();
     const nextWorkspace = transitionPlateWorkspace(workspace, { type: "select-plate", index });
     setWorkspace(nextWorkspace);
+    setMethodReviewOpen(false);
     resetPlatePresentation(next);
     setSelectedModuleId(nextWorkspace.selectedModuleId);
     setModuleSelectionTouched(false);
@@ -390,6 +405,24 @@ export default function App() {
 
   function renameActivePlate(name: string) {
     setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "rename-active-plate", name }) : current);
+  }
+
+  function openMethodReview() {
+    if (!plate) return;
+    setMethodReviewDraft(displayedAssayMethodLabel(plate));
+    setMethodReviewOpen(true);
+  }
+
+  function confirmMethodReview() {
+    const label = methodReviewDraft.trim();
+    if (!label) {
+      setError("请先填写或选择实验方法，再完成复核。");
+      return;
+    }
+    setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "review-active-assay-method", label }) : current);
+    setMethodReviewOpen(false);
+    setError("");
+    setNotice(`实验方法已人工复核为“${label}”；仪器记录和系统原始识别保持不变。`);
   }
 
   async function importInstrumentFile(file: File) {
@@ -570,11 +603,6 @@ export default function App() {
     downloadArtifact(createArtifact({ kind: artifactKind, plate, result: displayedAnalysis, scope: exportScope, analysisConfig: config }));
   }
 
-  function updateExperiment(patch: Partial<typeof experiment>) {
-    if (!workspace) return;
-    setWorkspace(transitionPlateWorkspace(workspace, { type: "set-experiment", experiment: { ...experiment, ...patch } }));
-  }
-
   function updateAnalysisConfig(patch: Partial<typeof config>, touched = controlGroupTouched) {
     if (!workspace) return;
     setWorkspace(transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...config, ...patch }, touched }));
@@ -681,23 +709,18 @@ export default function App() {
         </div> : null}
 
         <AssayWorkflowPanel variant="disclosure" module={selectedModule} plate={plate && activeModuleId === selectedModuleId ? plate : null} />
-        <details className="experiment-record" open={Boolean(experiment.name || experiment.operator || experiment.date || experiment.notes)}>
-          <summary>实验记录信息 <small>随可复现项目和溯源导出保存</small></summary>
-          <div className="experiment-record-grid">
-            <Field label="实验名称"><input value={experiment.name} onChange={(event) => updateExperiment({ name: event.target.value })} placeholder="例如 Drug response · Day 2" /></Field>
-            <Field label="操作者"><input value={experiment.operator} onChange={(event) => updateExperiment({ operator: event.target.value })} /></Field>
-            <Field label="实验日期"><input type="date" value={experiment.date} onChange={(event) => updateExperiment({ date: event.target.value })} /></Field>
-            <Field label="项目备注"><input value={experiment.notes} onChange={(event) => updateExperiment({ notes: event.target.value })} /></Field>
-          </div>
-        </details>
-
         {plates.length > 1 ? <div className="plate-switcher"><div><strong>本次导入包含 {plates.length} 块板</strong><small>各板注释与分析相互独立，不会自动合并为生物学重复。</small></div><div className="plate-switcher-buttons">{plates.map((item, index) => <button type="button" key={`${item.metadata.plateName}-${index}`} className={index === activePlateIndex ? "active" : ""} onClick={() => selectActivePlate(index)}>{index + 1}. {item.metadata.plateName}</button>)}</div><label>当前板名称<input value={plate?.metadata.plateName ?? ""} onChange={(event) => renameActivePlate(event.target.value)} /></label></div> : null}
         {plate ? <div className="experiment-overview">
-          <div className="experiment-overview-head"><div><h3>本次实验基本信息</h3><p>仪器报告值、用户填写值和推断项会分别标明；人工读数不会伪装成仪器元数据。</p></div><span className={`evidence-badge ${plate.metadata.assayMethodEvidence}`}>{plate.metadata.assayMethodEvidence === "reported" ? "协议已记录" : plate.metadata.assayMethodEvidence === "user-reported" ? "用户已填写" : "需复核"}</span></div>
+          <div className="experiment-overview-head"><div><h3>本次实验基本信息</h3><p>仪器报告值、用户填写值和推断项分别保留；人工确认不会覆盖原始记录。</p></div>{plate.metadata.assayMethodReviewDecision === "user-confirmed" ? <button type="button" className="evidence-badge user-reviewed" onClick={openMethodReview}>已复核 · 修改</button> : plate.metadata.assayMethodEvidence === "reported" ? <span className="evidence-badge reported">协议已记录</span> : plate.metadata.assayMethodEvidence === "user-reported" ? <span className="evidence-badge user-reported">用户已填写</span> : assayMethodNeedsReview ? <button type="button" className={`evidence-badge review-action ${plate.metadata.assayMethodEvidence}`} onClick={openMethodReview}>核对实验方法</button> : null}</div>
+          {methodReviewOpen ? <div className="method-review-panel" aria-label="实验方法复核">
+            <div><strong>核对实验方法</strong><p>确认值用于后续展示与导出；仪器记录和系统原始识别不会被改写。</p></div>
+            <label>确认方法<input list="assay-method-options" value={methodReviewDraft} onChange={(event) => setMethodReviewDraft(event.target.value)} autoFocus /><datalist id="assay-method-options">{activeModule.supportedMethods.map((method) => <option key={method} value={method} />)}</datalist></label>
+            <div className="method-review-actions"><button type="button" className="secondary-button mini" onClick={() => setMethodReviewOpen(false)}>取消</button><button type="button" className="primary-button mini" onClick={confirmMethodReview}>确认方法</button></div>
+          </div> : null}
           <div className="metadata-grid experiment-metadata-grid">
             <Metric label="确认实验类型" value={activeModule.name} detail={`决策：${plate.metadata.assayAssignmentDecision ?? "未记录"}`} />
             <Metric label="系统识别类型" value={detectedAssayModule(plate) === "unknown" ? "未可靠识别" : getAssayWorkflow(detectedAssayModule(plate)).name} detail="与用户确认结果分别保留" />
-            <Metric label="实验方法" value={plate.metadata.assayMethodLabel} detail={methodEvidenceLabel(plate)} />
+            <Metric label="实验方法" value={displayedAssayMethodLabel(plate)} detail={methodEvidenceLabel(plate)} />
             <Metric label="检测模式" value={detectionModeLabel(plate.metadata.detectionMode)} detail={`${plate.metadata.measurementName || "未命名通道"} · ${plate.metadata.signalUnit || "无单位"}`} />
             <Metric label="读数通道" value={measurementChannel(plate)} detail={plate.metadata.detectionMode === "fluorescence" ? "激发 / 发射" : "主波长 / 参比波长"} />
             <Metric label="仪器" value={instrumentDisplay(plate)} detail={plate.metadata.instrumentSerialNumber ? `S/N ${plate.metadata.instrumentSerialNumber}` : "序列号未记录"} />
@@ -708,7 +731,7 @@ export default function App() {
           </div>
         </div> : null}
         {plate?.warnings.length ? <ul className="compact-findings">{plate.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
-        {plate ? <div className="next-step import-next-step"><div><strong>基本信息已解析</strong><p>{useGenericWorkflow ? `已保留 ${plate.assayData?.measurements.length ?? 0} 个测量/计算步骤；下一步可检查板图身份与孔位注释。` : "请复核实验方法和检测通道；下一步补充样本、对照、空白与重复信息。"}</p></div><button type="button" className="primary-button" onClick={() => navigateTo("layout")}>进入板图与注释</button></div> : null}
+        {plate ? <div className="next-step import-next-step"><div><strong>基本信息已解析</strong><p>{useGenericWorkflow ? `已保留 ${plate.assayData?.measurements.length ?? 0} 个测量/计算步骤；下一步可检查板图身份与孔位注释。` : assayMethodNeedsReview ? "请先核对实验方法；下一步补充样本、对照、空白与重复信息。" : "实验方法已有明确来源或已完成复核；下一步补充样本、对照、空白与重复信息。"}</p></div><button type="button" className="primary-button" onClick={() => navigateTo("layout")}>进入板图与注释</button></div> : null}
       </section> : null}
 
       {view === "layout" && plate ? <section className="workspace">

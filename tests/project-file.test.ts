@@ -23,7 +23,7 @@ describe("versioned reproducible artifact module", () => {
       notes: "confirmed",
     } : well);
     const experiment = { name: "Round trip", operator: "Researcher", date: "2026-08-22", notes: "local only" };
-    const artifact = createArtifact({ kind: "project", plates: [{ ...plate, wells }], experiment, activeModuleId: "cell-viability", analysisConfig: config });
+    const artifact = createArtifact({ kind: "project", plates: [{ ...plate, metadata: { ...plate.metadata, confirmedAssayMethodLabel: "CCK-8 / WST-8", assayMethodReviewDecision: "user-confirmed" }, wells }], experiment, activeModuleId: "cell-viability", analysisConfig: config });
     const restored = parseProjectArtifact(artifact.content, "round-trip.json");
 
     expect(artifact.filename).toContain("reproducible-project.json");
@@ -34,7 +34,7 @@ describe("versioned reproducible artifact module", () => {
     expect(restored.restoredAnalysisConfig?.baselineNormalization?.enabled).toBe(false);
     expect(restored.restoredActiveModuleId).toBe("cell-viability");
     expect(restored.plates[0].wells[0]).toMatchObject({ rawValue: 0, role: "control", group: "Control", notes: "confirmed" });
-    expect(restored.plates[0].metadata).toMatchObject({ reopenedFromProjectFile: "round-trip.json", assayAssignmentDecision: "project-restored" });
+    expect(restored.plates[0].metadata).toMatchObject({ reopenedFromProjectFile: "round-trip.json", assayAssignmentDecision: "project-restored", confirmedAssayMethodLabel: "CCK-8 / WST-8", assayMethodReviewDecision: "user-confirmed" });
   });
 
   it("rejects unrelated or unsupported JSON instead of guessing", () => {
