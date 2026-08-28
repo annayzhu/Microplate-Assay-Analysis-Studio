@@ -61,6 +61,21 @@ describe("Plate workspace acceptance scenarios", () => {
     expect(selected.displayedSignificanceComparisons.every((row) => row.group === "Drug")).toBe(true);
   });
 
+  it("clears plate-local summary and well selections when the active plate changes", () => {
+    let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch([fixturePlate("Day 0"), fixturePlate("Day 1")]), "cell-viability", true));
+    const drug = readPlateWorkspace(workspace).analysis.biologicalSummaries.find((row) => row.group === "Drug");
+    expect(drug).toBeDefined();
+    workspace = transitionPlateWorkspace(workspace, { type: "toggle-summary", key: drug!.key });
+    workspace = transitionPlateWorkspace(workspace, { type: "select-wells", wellIds: new Set(["C1"]), anchor: "C1" });
+
+    workspace = transitionPlateWorkspace(workspace, { type: "select-plate", index: 1 });
+
+    expect(workspace.selectedSummaryKeys.size).toBe(0);
+    expect(workspace.selectedWellIds.size).toBe(0);
+    expect(workspace.selectionAnchor).toBeNull();
+    expect(readPlateWorkspace(workspace).exportScope).toBe("all");
+  });
+
   it("keeps raw measurements immutable while annotations change", () => {
     const aggregate = createPlateAggregate(fixturePlate());
     const projected = aggregatePlate(aggregate);

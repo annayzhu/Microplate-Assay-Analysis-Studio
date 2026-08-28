@@ -205,6 +205,35 @@ try {
   await page.getByRole("button", { name: "重置为百分之百" }).click();
   if (await page.locator(".plate-scroll").getAttribute("data-zoom") !== "100") throw new Error("Zoom reset did not return to 100%.");
 
+  const layoutActionTops = await Promise.all((await page.locator(".layout-heading-actions select, .layout-heading-actions button").all()).map(async (control) => (await control.boundingBox())?.y ?? Number.NaN));
+  if (new Set(layoutActionTops.map((value) => Math.round(value))).size > 1) throw new Error(`Wide layout actions are not aligned: ${layoutActionTops.join(", ")}.`);
+  const platePanelHeight = (await page.locator(".plate-panel").boundingBox())?.height ?? Number.NaN;
+  const annotationPanelHeight = (await page.locator(".annotation-panel").boundingBox())?.height ?? Number.NaN;
+  if (Math.abs(platePanelHeight - annotationPanelHeight) > 1) throw new Error(`Plate and annotation editors do not share one viewport height: ${platePanelHeight}/${annotationPanelHeight}.`);
+  await page.getByText("更多实验信息", { exact: false }).click();
+  await page.getByRole("button", { name: "放大孔板" }).click();
+  await page.getByRole("button", { name: "放大孔板" }).click();
+  await page.getByRole("button", { name: "放大孔板" }).click();
+  const plateScroll = page.locator(".plate-scroll");
+  const annotationScroll = page.locator(".annotation-panel-body");
+  const annotationStart = await annotationScroll.evaluate((element) => element.scrollTop);
+  const plateScrollResult = await plateScroll.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.scrollLeft = element.scrollWidth;
+    return { top: element.scrollTop, left: element.scrollLeft };
+  });
+  if (plateScrollResult.top <= 0 && plateScrollResult.left <= 0) throw new Error("Plate viewport is not independently scrollable at 130% zoom.");
+  if (await annotationScroll.evaluate((element) => element.scrollTop) !== annotationStart) throw new Error("Scrolling the plate unexpectedly moved the annotation viewport.");
+  const platePositionBeforeAnnotation = await plateScroll.evaluate((element) => ({ top: element.scrollTop, left: element.scrollLeft }));
+  const annotationEnd = await annotationScroll.evaluate((element) => { element.scrollTop = element.scrollHeight; return element.scrollTop; });
+  if (annotationEnd <= 0) throw new Error("Batch annotation body is not independently scrollable.");
+  const platePositionAfterAnnotation = await plateScroll.evaluate((element) => ({ top: element.scrollTop, left: element.scrollLeft }));
+  if (JSON.stringify(platePositionAfterAnnotation) !== JSON.stringify(platePositionBeforeAnnotation)) throw new Error("Scrolling annotations unexpectedly moved the plate viewport.");
+  const annotationPanelBounds = await page.locator(".annotation-panel").boundingBox();
+  const annotationFooterBounds = await page.locator(".annotation-panel-footer").boundingBox();
+  if (!annotationPanelBounds || !annotationFooterBounds || annotationFooterBounds.y + annotationFooterBounds.height > annotationPanelBounds.y + annotationPanelBounds.height + 1) throw new Error("Annotation footer is not fixed inside its independent viewport.");
+  await page.getByRole("button", { name: "重置为百分之百" }).click();
+
   await page.getByLabel("分组 · Group").fill("ManualGroup");
   await page.getByLabel("生物学重复").fill("Bio1");
   await page.getByText("尚未应用", { exact: true }).waitFor();
@@ -365,7 +394,7 @@ try {
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-multifile-append.png"), fullPage: true });
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-imported.png"), fullPage: true });
     await page.getByRole("button", { name: "进入板图与注释" }).click();
-    const layoutPlateTabs = page.locator(".layout-plate-tabs button");
+    const layoutPlateTabs = page.locator(".layout-plate-context .plate-context-tabs button");
     if (await layoutPlateTabs.count() !== 4) throw new Error(`Layout page did not expose four plate tabs: ${await layoutPlateTabs.count()}.`);
     const layoutContextText = await page.locator(".layout-plate-context").innerText();
     for (const signal of ["当前板 3 / 4", "Plate 1", "cck8-day-1-copy"]) {
@@ -380,7 +409,7 @@ try {
     await page.getByRole("button", { name: "清空填写" }).click();
     await layoutPlateTabs.first().click();
     if (await layoutPlateTabs.first().getAttribute("aria-current") !== "page") throw new Error("Layout plate tab did not switch the active plate.");
-    if (!(await page.locator(".layout-active-plate").innerText()).includes("当前板 1 / 4")) throw new Error("Active plate identity did not update after tab switching.");
+    if (!(await page.locator(".layout-plate-context .active-plate-identity").innerText()).includes("当前板 1 / 4")) throw new Error("Active plate identity did not update after tab switching.");
     await verifyLayoutPreviousStep(page);
     const layoutText = await page.locator("body").innerText();
     requiredLayoutSignals = ["96孔板 · 96个已测孔", "样本 72", "质控 12", "空白 12", "板图尚未完成"];
@@ -388,6 +417,14 @@ try {
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-layout.png"), fullPage: true });
     await page.getByRole("button", { name: /分析与导出/ }).click();
     await page.getByRole("heading", { name: "分析与导出" }).waitFor();
+    const analysisPlateTabs = page.locator(".analysis-plate-context .plate-context-tabs button");
+    if (await analysisPlateTabs.count() !== 4) throw new Error(`Analysis page did not expose four plate tabs: ${await analysisPlateTabs.count()}.`);
+    if (!(await page.locator(".analysis-plate-context .active-plate-identity").innerText()).includes("当前分析板 1 / 4")) throw new Error("Analysis page did not identify the active plate.");
+    await analysisPlateTabs.last().click();
+    if (await analysisPlateTabs.last().getAttribute("aria-current") !== "page") throw new Error("Analysis plate tab did not switch the active plate.");
+    const switchedAnalysisIdentity = await page.locator(".analysis-plate-context .active-plate-identity").innerText();
+    if (!switchedAnalysisIdentity.includes("当前分析板 4 / 4") || !switchedAnalysisIdentity.includes("cck8-day-2-copy")) throw new Error(`Analysis plate identity did not follow plate switching: ${switchedAnalysisIdentity}`);
+    await analysisPlateTabs.first().click();
     const analysisText = await page.locator("body").innerText();
     incompleteLayoutGateVisible = analysisText.includes("LAYOUT_INCOMPLETE");
     if (!incompleteLayoutGateVisible) throw new Error("Analysis view did not preserve the incomplete-layout QC gate.");
