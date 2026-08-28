@@ -273,8 +273,11 @@ try {
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
-  if (!manualAnalysisText.includes("结果 Excel 同时包含生物学汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
-  if (await page.getByRole("button", { name: "技术复孔 CSV" }).count()) throw new Error("Standalone technical-replicate CSV action is still visible.");
+  if (!manualAnalysisText.includes("正式结果统一导出为 Excel，内含生物学汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
+  for (const redundantExport of ["孔级 CSV", "技术复孔 CSV", "汇总 CSV"]) {
+    if (await page.getByRole("button", { name: redundantExport, exact: true }).count()) throw new Error(`Redundant ${redundantExport} action is still visible.`);
+  }
+  if (await page.getByRole("button", { name: "导出结果 Excel", exact: true }).count() !== 1) throw new Error("The analysis UI does not expose exactly one formal result-workbook action.");
   await verifyAnalysisPreviousStep(page);
   const qcFindingRows = await page.locator(".qc-mini-list li").all();
   const qcFindingHeights = await Promise.all(qcFindingRows.map(async (row) => (await row.boundingBox())?.height ?? Number.NaN));
@@ -483,7 +486,7 @@ try {
   const normalizationStatusText = await normalizationDisclosure.innerText();
   if (!normalizationStatusText.toLowerCase().includes("ready")) throw new Error(`Baseline normalization did not reach ready state in the browser.\n${normalizationStatusText}`);
   const workbookDownloadEvent = page.waitForEvent("download");
-  await page.getByRole("button", { name: "结果 Excel" }).click();
+  await page.getByRole("button", { name: "导出结果 Excel" }).click();
   const workbookDownload = await workbookDownloadEvent;
   const workbookPath = await workbookDownload.path();
   if (!workbookPath || !workbookDownload.suggestedFilename().endsWith("-results-all.xlsx")) throw new Error("Consolidated result workbook was not downloaded.");
