@@ -35,6 +35,7 @@ function makeWell(
 
 const config = {
   controlGroup: "Vehicle",
+  relativeToControlEnabled: true,
   technicalCvThresholdPercent: 10,
   blankCvThresholdPercent: 10,
 };
@@ -94,7 +95,7 @@ describe("CCK-8 analysis", () => {
 
     expect(headers).toEqual(expect.arrayContaining([
       "signal_basis", "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
-      "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference",
+      "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference", "normalization_method", "normalization_note",
     ]));
     expect(headers).not.toContain("value");
     expect(headers).not.toContain("sd");
@@ -105,6 +106,8 @@ describe("CCK-8 analysis", () => {
     expect(Number(value("relative_to_control_percent"))).toBeCloseTo(50, 12);
     expect(Number(value("relative_to_control_sd_percent"))).toBeCloseTo(5, 12);
     expect(value("normalization_reference")).toBe("Vehicle");
+    expect(value("normalization_method")).toBe("fixed-reference-scaling");
+    expect(value("normalization_note")).toMatch(/denominator uncertainty is ignored/i);
   });
 
   it("falls back to Welch t-test when biological replicates are not matched", () => {

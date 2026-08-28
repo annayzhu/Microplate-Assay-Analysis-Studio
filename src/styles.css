@@ -376,7 +376,7 @@ main { padding-bottom: 40px; }
 .empty-state.compact { min-height: 56px; font-size: var(--ln-font-size-sm); }
 .summary-panel-head { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; }
 .summary-panel-head > div:first-child { min-width: 0; }
-.summary-head-actions { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: var(--ln-space-2); max-width: none; }
+.summary-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--ln-space-2); max-width: 520px; }
 .summary-head-actions .secondary-button { white-space: nowrap; }
 .secondary-button.mini { min-height: var(--ln-control-height-xs); padding: var(--ln-space-2) 9px; border-radius: var(--ln-radius-sm); font-size: var(--ln-font-size-sm); }
 .summary-table-scroll table { min-width: 760px; }
@@ -396,6 +396,26 @@ main { padding-bottom: 40px; }
 .method-note { padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--ln-color-surface-warm); }
 .method-note strong { display: block; color: var(--ink); font-size: var(--ln-font-size-sm); }
 .method-note p { margin: var(--ln-space-1) 0 0; color: var(--muted); font-size: var(--ln-font-size-xs); line-height: var(--ln-line-height-normal); }
+.compact-check { display: flex; align-items: flex-start; gap: var(--ln-space-2); color: var(--graphite); font-size: var(--ln-font-size-xs); line-height: 1.35; }
+.compact-check input { flex: 0 0 auto; margin-top: 1px; }
+.baseline-normalization-controls { border-top: 1px solid var(--line); }
+.baseline-normalization-controls summary { display: flex; align-items: center; justify-content: space-between; gap: var(--ln-space-2); padding: var(--ln-space-3) var(--ln-space-4); color: var(--graphite); font-size: var(--ln-font-size-sm); font-weight: 850; cursor: pointer; }
+.baseline-normalization-controls summary em { color: var(--muted); font-size: var(--ln-font-size-2xs); font-style: normal; text-transform: uppercase; }
+.baseline-normalization-body { display: grid; gap: var(--ln-space-3); padding: 0 var(--ln-space-4) var(--ln-space-4); }
+.baseline-normalization-body .field { grid-template-rows: auto minmax(var(--ln-control-height-sm),auto) auto; gap: 4px; font-size: var(--ln-font-size-xs); }
+.baseline-normalization-body .field input,.baseline-normalization-body .field select { min-height: var(--ln-control-height-sm); padding: 7px 9px; font-size: var(--ln-font-size-sm); }
+.normalization-plate-scope { display: grid; gap: 4px; padding: var(--ln-space-2); border: 1px solid var(--line); border-radius: var(--ln-radius-sm); background: var(--ln-color-surface-warm); }
+.normalization-plate-scope strong { font-size: var(--ln-font-size-xs); }
+.normalization-plate-scope label { display: flex; align-items: center; gap: 6px; color: var(--graphite); font-size: var(--ln-font-size-xs); }
+.normalization-findings { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.normalization-findings li { padding: 6px 8px; border-radius: var(--ln-radius-xs); color: var(--graphite); background: var(--warning-soft); font-size: var(--ln-font-size-2xs); line-height: 1.35; }
+.normalization-findings li.error { color: var(--danger); background: var(--danger-soft); }
+.normalization-findings strong { display: block; margin-bottom: 2px; }
+.normalization-preview { border-top: 1px solid var(--line); }
+.normalization-preview > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: var(--ln-space-3); padding: var(--ln-space-3) var(--ln-space-4); }
+.normalization-preview > div:first-child strong { font-size: var(--ln-font-size-sm); }
+.normalization-preview > p { margin: 0; padding: var(--ln-space-3) var(--ln-space-4); color: var(--muted); font-size: var(--ln-font-size-xs); }
+.normalization-preview table { min-width: 940px; }
 .significance-panel .table-scroll.compact table { min-width: 540px; font-size: var(--ln-table-compact-font-size); }
 .significance-panel .table-scroll th,.significance-panel .table-scroll td { padding: var(--ln-table-compact-padding-y) var(--ln-table-compact-padding-x); }
 
