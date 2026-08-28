@@ -229,7 +229,7 @@ export function createArtifact(request: ArtifactRequest): ReproducibleArtifact {
       filename: artifactName(request.plate.metadata.sourceFileName, "analysis-package.json"),
       mimeType: "application/json",
       content: JSON.stringify({
-        schemaVersion: 1, tool: toolIdentity, assay: { id: "cell-viability", label: request.plate.metadata.assayMethodLabel },
+        schemaVersion: 1, tool: toolIdentity, assay: { id: "cell-viability", label: request.plate.metadata.confirmedAssayMethodLabel ?? request.plate.metadata.assayMethodLabel },
         generatedAt: new Date().toISOString(), source: request.plate.metadata, config: request.analysisConfig,
         annotations: request.wells.map(({ rawValue: _rawValue, ...well }) => well),
         projectSources: request.plates.map((plate) => ({

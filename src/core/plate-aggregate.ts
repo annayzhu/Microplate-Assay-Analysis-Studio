@@ -117,6 +117,24 @@ export function assignPlateAssay(aggregate: PlateAggregate, moduleId: AssayModul
         selectedAssayModuleId: moduleId,
         confirmedAssayModuleId: moduleId,
         assayAssignmentDecision: "user-confirmed",
+        confirmedAssayMethodLabel: undefined,
+        assayMethodReviewDecision: undefined,
+      },
+    },
+  };
+}
+
+export function reviewPlateAssayMethod(aggregate: PlateAggregate, label: string): PlateAggregate {
+  const confirmedLabel = label.trim();
+  if (!confirmedLabel) throw new Error("确认实验方法前需要填写方法名称。");
+  return {
+    ...aggregate,
+    source: {
+      ...aggregate.source,
+      metadata: {
+        ...aggregate.source.metadata,
+        confirmedAssayMethodLabel: confirmedLabel,
+        assayMethodReviewDecision: "user-confirmed",
       },
     },
   };

@@ -8,6 +8,7 @@ import {
   createPlateAggregate,
   renamePlate,
   replaceWellAnnotations,
+  reviewPlateAssayMethod,
   updateWellAnnotations,
   type PlateAggregate,
   type WellAnnotation,
@@ -56,6 +57,7 @@ export type PlateWorkspaceAction =
   | { type: "select-plate"; index: number }
   | { type: "rename-active-plate"; name: string }
   | { type: "assign-active-assay"; moduleId: AssayModuleId }
+  | { type: "review-active-assay-method"; label: string }
   | { type: "select-wells"; wellIds: ReadonlySet<string>; anchor: string | null }
   | { type: "replace-active-wells"; wells: WellRecord[] }
   | { type: "update-selected-annotations"; update: (annotation: WellAnnotation, well: WellRecord, index: number) => WellAnnotation }
@@ -216,6 +218,11 @@ export function transitionPlateWorkspace(workspace: PlateWorkspace, action: Plat
       selectedModuleId: action.moduleId,
       selectedSummaryKeys: new Set(),
       plates: workspace.plates.map((plate, index) => index === workspace.activePlateIndex ? assignPlateAssay(plate, action.moduleId) : plate),
+    };
+  } else if (action.type === "review-active-assay-method") {
+    next = {
+      ...workspace,
+      plates: workspace.plates.map((plate, index) => index === workspace.activePlateIndex ? reviewPlateAssayMethod(plate, action.label) : plate),
     };
   } else if (action.type === "select-wells") {
     next = { ...workspace, selectedWellIds: new Set(action.wellIds), selectionAnchor: action.anchor };
