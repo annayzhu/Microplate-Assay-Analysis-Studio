@@ -273,7 +273,7 @@ try {
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
-  if (!manualAnalysisText.includes("正式结果统一导出为 Excel，内含生物学汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
+  if (!manualAnalysisText.includes("正式结果统一导出为 Excel，内含生物学汇总、技术复孔汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
   for (const redundantExport of ["孔级 CSV", "技术复孔 CSV", "汇总 CSV"]) {
     if (await page.getByRole("button", { name: redundantExport, exact: true }).count()) throw new Error(`Redundant ${redundantExport} action is still visible.`);
   }
@@ -491,11 +491,14 @@ try {
   const workbookPath = await workbookDownload.path();
   if (!workbookPath || !workbookDownload.suggestedFilename().endsWith("-results-all.xlsx")) throw new Error("Consolidated result workbook was not downloaded.");
   const workbook = XLSX.read(await readFile(workbookPath), { type: "buffer" });
-  const expectedWorkbookSheets = ["导出说明", "生物学汇总", "孔级数据", "板布局"];
+  const expectedWorkbookSheets = ["导出说明", "生物学汇总", "技术复孔汇总", "孔级数据", "板布局"];
   if (JSON.stringify(workbook.SheetNames) !== JSON.stringify(expectedWorkbookSheets)) throw new Error(`Unexpected result workbook sheets: ${workbook.SheetNames.join(", ")}`);
   const workbookSummaryRows = XLSX.utils.sheet_to_json(workbook.Sheets["生物学汇总"]);
+  const workbookTechnicalRows = XLSX.utils.sheet_to_json(workbook.Sheets["技术复孔汇总"]);
   const workbookWellRows = XLSX.utils.sheet_to_json(workbook.Sheets["孔级数据"]);
-  if (!workbookSummaryRows.length || !workbookWellRows.length) throw new Error("Result workbook sheets are empty.");
+  if (!workbookSummaryRows.length || !workbookTechnicalRows.length || !workbookWellRows.length) throw new Error("Result workbook sheets are empty.");
+  if (!("blank_corrected_biological_mean" in workbookSummaryRows[0])) throw new Error("Biological mean is not explicitly named in the result workbook.");
+  if (!("blank_corrected_technical_mean" in workbookTechnicalRows[0])) throw new Error("Technical-replicate mean is missing from the result workbook.");
   const normalizedDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "标准化结果" }).click();
   const normalizedDownload = await normalizedDownloadEvent;
