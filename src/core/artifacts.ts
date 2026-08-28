@@ -70,15 +70,27 @@ function annotatedWellsCsv(result: CellViabilityAnalysisResult, plate: ParsedPla
   return rowsToCsv(headers, annotatedWellExportRows(result, plate));
 }
 
-function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
-  const headers = ["sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "wells", "n_technical", "raw_mean", "raw_sd", "raw_cv_percent", "corrected_mean", "corrected_sd", "corrected_cv_percent", "plate_name", "import_source"];
-  return rowsToCsv(headers, result.technicalSummaries.map((row) => ({
+export function technicalSummaryExportRows(result: CellViabilityAnalysisResult, plate: ParsedPlate): Array<Record<string, unknown>> {
+  return result.technicalSummaries.map((row) => ({
     sample_id: row.sampleId, group: row.group, treatment: row.treatment, concentration: row.concentration,
-    timepoint: row.timepoint, biological_replicate: row.biologicalReplicate, wells: row.wells.join(";"),
-    n_technical: row.nTechnical, raw_mean: row.rawMean, raw_sd: row.rawSd, raw_cv_percent: row.rawCvPercent,
-    corrected_mean: row.correctedMean, corrected_sd: row.correctedSd, corrected_cv_percent: row.correctedCvPercent,
-    plate_name: plate.metadata.plateName, import_source: plate.metadata.sourceKind,
-  })));
+    timepoint: row.timepoint, biological_replicate: row.biologicalReplicate, source_wells: row.wells.join(";"),
+    n_technical: row.nTechnical,
+    raw_technical_mean: row.rawMean, raw_technical_sd: row.rawSd, raw_technical_cv_percent: row.rawCvPercent,
+    blank_corrected_technical_mean: row.correctedMean, blank_corrected_technical_sd: row.correctedSd,
+    blank_corrected_technical_cv_percent: row.correctedCvPercent,
+    plate_id: plate.plateId ?? "", plate_name: plate.metadata.plateName, source_file: plate.metadata.sourceFileName,
+    import_source: plate.metadata.sourceKind, adapter_id: plate.metadata.adapterId,
+  }));
+}
+
+function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
+  const headers = [
+    "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "source_wells", "n_technical",
+    "raw_technical_mean", "raw_technical_sd", "raw_technical_cv_percent",
+    "blank_corrected_technical_mean", "blank_corrected_technical_sd", "blank_corrected_technical_cv_percent",
+    "plate_id", "plate_name", "source_file", "import_source", "adapter_id",
+  ];
+  return rowsToCsv(headers, technicalSummaryExportRows(result, plate));
 }
 
 export function biologicalSummaryExportRows(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): Array<Record<string, unknown>> {
@@ -90,7 +102,8 @@ export function biologicalSummaryExportRows(result: CellViabilityAnalysisResult,
       group: row.group, treatment: row.treatment,
       concentration: row.concentration, timepoint: row.timepoint, n_biological: row.nBiological,
       signal_basis: "blank-corrected",
-      blank_corrected_mean: row.correctedMean, blank_corrected_sd: row.correctedSd, blank_corrected_sem: row.correctedSem,
+      blank_corrected_biological_mean: row.correctedMean, blank_corrected_biological_sd: row.correctedSd,
+      blank_corrected_biological_sem: row.correctedSem,
       relative_to_control_percent: row.relativeActivityPercent, relative_to_control_sd_percent: row.relativeSdPercent,
       relative_to_control_sem_percent: row.relativeSemPercent,
       normalization_reference: row.relativeActivityPercent === null ? "" : analysisConfig?.controlGroup ?? comparison?.controlGroup ?? "control group",
@@ -107,7 +120,7 @@ export function biologicalSummaryExportRows(result: CellViabilityAnalysisResult,
 function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): string {
   const headers = [
     "category", "group", "treatment", "concentration", "timepoint", "n_biological", "signal_basis",
-    "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
+    "blank_corrected_biological_mean", "blank_corrected_biological_sd", "blank_corrected_biological_sem",
     "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference", "normalization_method", "normalization_note",
     "p_value_vs_control", "fdr_vs_control", "significance", "plate_id", "plate_name", "source_file", "import_source", "adapter_id",
   ];

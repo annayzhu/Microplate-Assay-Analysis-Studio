@@ -1,6 +1,6 @@
 import XLSX from "xlsx-js-style";
 import packageMetadata from "../../package.json";
-import { annotatedWellExportRows, biologicalSummaryExportRows } from "./artifacts";
+import { annotatedWellExportRows, biologicalSummaryExportRows, technicalSummaryExportRows } from "./artifacts";
 import type { AnalysisConfig, CellViabilityAnalysisResult, ParsedPlate, WellRole } from "./types";
 
 export type ResultWorkbook = {
@@ -112,7 +112,9 @@ function exportInfoSheet(plate: ParsedPlate, result: CellViabilityAnalysisResult
     ["信号单位", plate.metadata.signalUnit],
     ["Blank mean", result.blankMean ?? ""],
     ["Blank SD", result.blankSd ?? ""],
-    ["说明", "原始读数保持不变；blank-corrected 值为派生结果。技术复孔先在同一 biological replicate 内汇总，但不作为独立工作表导出。"],
+    ["技术复孔 mean", "同一实验条件、同一 biological replicate 内的孔级读数先求 mean；每行代表一个 biological replicate。"],
+    ["生物学重复 mean", "同一实验条件下，各 biological replicate 的 blank-corrected technical mean 再求 mean；SD、SEM 和推断统计均以 biological replicate 为单位。"],
+    ["说明", "原始读数保持不变；blank-corrected 值为派生结果。技术复孔不会被当作独立生物学样本。"],
   ];
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   applyTableStyle(sheet, [22, 88]);
@@ -128,11 +130,14 @@ export function createResultWorkbook(input: {
   const { plate, result, analysisConfig, scope } = input;
   const workbook = XLSX.utils.book_new();
   const summarySheet = XLSX.utils.json_to_sheet(biologicalSummaryExportRows(result, plate, analysisConfig));
+  const technicalSheet = XLSX.utils.json_to_sheet(technicalSummaryExportRows(result, plate));
   const wellSheet = XLSX.utils.json_to_sheet(annotatedWellExportRows(result, plate));
   applyTableStyle(summarySheet, [24, 18, 18, 14, 12, 12, 18, 20, 20, 20, 20, 22, 22, 24, 25, 54, 18, 18, 14, 18, 20, 32, 18, 28]);
+  applyTableStyle(technicalSheet, [20, 18, 18, 14, 12, 20, 24, 14, 20, 18, 22, 28, 26, 28, 18, 18, 32, 18, 24]);
   applyTableStyle(wellSheet, [10, 8, 9, 20, 12, 22, 18, 18, 14, 12, 18, 18, 16, 22, 12, 28, 20, 18, 30, 18, 28, 18, 14]);
   XLSX.utils.book_append_sheet(workbook, exportInfoSheet(plate, result, scope), "导出说明");
   XLSX.utils.book_append_sheet(workbook, summarySheet, "生物学汇总");
+  XLSX.utils.book_append_sheet(workbook, technicalSheet, "技术复孔汇总");
   XLSX.utils.book_append_sheet(workbook, wellSheet, "孔级数据");
   XLSX.utils.book_append_sheet(workbook, layoutSheet(plate, result), "板布局");
   const output = new Uint8Array(XLSX.write(workbook, { type: "array", bookType: "xlsx", compression: true }));

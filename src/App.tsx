@@ -667,7 +667,7 @@ export default function App() {
     if (kind === "workbook") {
       const workbook = createResultWorkbook({ plate, result: displayedAnalysis, analysisConfig: config, scope: exportScope });
       downloadBlob(workbook.filename, new Blob([workbook.bytes], { type: workbook.mimeType }));
-      setNotice("结果 Excel 已导出：包含导出说明、生物学汇总、孔级数据和板布局。");
+      setNotice("结果 Excel 已导出：包含导出说明、生物学汇总、技术复孔汇总、孔级数据和板布局。");
       return;
     }
   }
@@ -955,7 +955,7 @@ export default function App() {
 
           <section className="panel table-panel summary-panel">
             <div className="panel-head summary-panel-head">
-              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 正式结果统一导出为 Excel，内含生物学汇总、孔级数据和板布局；relative_to_control_* 仅表示相对 Control 的派生结果。</p></div>
+              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 正式结果统一导出为 Excel，内含生物学汇总、技术复孔汇总、孔级数据和板布局；relative_to_control_* 仅表示相对 Control 的派生结果。</p></div>
               <div className="summary-head-actions">
                 {selectedSummaryKeys.size ? <button type="button" className="secondary-button mini" onClick={() => setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "clear-summary-selection" }) : current)}>显示全部</button> : null}
                 <button type="button" className="primary-button mini" disabled={!displayedBiologicalSummaries.length} onClick={() => exportFiles("workbook")}>导出结果 Excel</button>
