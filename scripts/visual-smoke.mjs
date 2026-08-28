@@ -91,6 +91,27 @@ try {
   if (await workflowDisclosure.getAttribute("open") !== null) await workflowDisclosure.locator("summary").click();
   if (!(await workflowDisclosure.innerText()).includes("支持吸光、荧光和发光型细胞活性读数")) throw new Error("Cell-viability guidance does not name all supported detection modes.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-start.png"), fullPage: true });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const alignedFrameLocators = [".topbar-inner", ".assay-strip-inner", ".workspace"];
+  const alignedFrameBounds = await Promise.all(alignedFrameLocators.map((selector) => page.locator(selector).boundingBox()));
+  if (alignedFrameBounds.some((bounds) => !bounds)) throw new Error("A global alignment frame is missing.");
+  const [headerFrame, assayFrame, workspaceFrame] = alignedFrameBounds;
+  const frameLefts = alignedFrameBounds.map((bounds) => Math.round(bounds.x));
+  const frameRights = alignedFrameBounds.map((bounds) => Math.round(bounds.x + bounds.width));
+  if (new Set(frameLefts).size > 1 || new Set(frameRights).size > 1) {
+    throw new Error(`Global content frames are not aligned: left ${frameLefts.join(", ")}; right ${frameRights.join(", ")}.`);
+  }
+  if (!headerFrame || !assayFrame || !workspaceFrame) throw new Error("Unable to verify global content frame alignment.");
+  const workflowSummaryPadding = await workflowDisclosure.locator("summary").evaluate((element) => getComputedStyle(element).paddingLeft);
+  const experimentSummaryPadding = await page.locator(".experiment-record summary").evaluate((element) => getComputedStyle(element).paddingLeft);
+  if (workflowSummaryPadding !== experimentSummaryPadding) {
+    throw new Error(`Import disclosures do not share one text rail: ${workflowSummaryPadding} vs ${experimentSummaryPadding}.`);
+  }
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-global-frame-wide.png"), fullPage: true });
+  await page.setViewportSize({ width: 320, height: 800 });
+  const mobileImportOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (mobileImportOverflow > 1) throw new Error(`Minimum-width import workspace has ${mobileImportOverflow}px of page-level horizontal overflow.`);
+  await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-import-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 980, height: 1000 });
   const importOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   if (importOverflow > 1) throw new Error(`Compact import workspace has ${importOverflow}px of page-level horizontal overflow.`);

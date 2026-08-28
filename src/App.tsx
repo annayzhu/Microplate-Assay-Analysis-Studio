@@ -586,28 +586,32 @@ export default function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <button className="brand" type="button" onClick={() => navigateTo("import")}>
-        <span className="brand-mark"><i /><i /><i /><i /></span>
-        <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v{toolIdentity.version}</small></span>
-      </button>
-      <div className="topbar-actions">
-        <span className="privacy-pill"><i />Browser-local</span>
-        {plate ? <span className={`status-pill ${workflowReady ? "ready" : "review"}`}>{workflowReady ? (activeModule.status === "complete" ? "分析就绪" : "数据预览就绪") : "需要补充信息"}</span> : null}
+      <div className="page-frame topbar-inner">
+        <button className="brand" type="button" onClick={() => navigateTo("import")}>
+          <span className="brand-mark"><i /><i /><i /><i /></span>
+          <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v{toolIdentity.version}</small></span>
+        </button>
+        <div className="topbar-actions">
+          <span className="privacy-pill"><i />Browser-local</span>
+          {plate ? <span className={`status-pill ${workflowReady ? "ready" : "review"}`}>{workflowReady ? (activeModule.status === "complete" ? "分析就绪" : "数据预览就绪") : "需要补充信息"}</span> : null}
+        </div>
       </div>
     </header>
 
     <main>
       <section className="assay-strip">
-        <div>
-          <h1>酶标数据入口，选择实验类型进行分析</h1>
-        </div>
-        <div className="assay-cards">
-          {assayModules.map((module) => <button key={module.id} type="button" disabled={module.status === "planned"} aria-pressed={selectedModuleId === module.id} onClick={() => selectAssayModule(module.id, module.name)} className={`assay-card ${module.status} ${selectedModuleId === module.id ? "active" : ""}`}>
-            <span>{module.shortName}</span>
-            <strong>{module.name}</strong>
-            <small>{module.measurementTarget}</small>
-            <em>{assayStatusLabel(module.status)}</em>
-          </button>)}
+        <div className="page-frame assay-strip-inner">
+          <div>
+            <h1>酶标数据入口，选择实验类型进行分析</h1>
+          </div>
+          <div className="assay-cards">
+            {assayModules.map((module) => <button key={module.id} type="button" disabled={module.status === "planned"} aria-pressed={selectedModuleId === module.id} onClick={() => selectAssayModule(module.id, module.name)} className={`assay-card ${module.status} ${selectedModuleId === module.id ? "active" : ""}`}>
+              <span>{module.shortName}</span>
+              <strong>{module.name}</strong>
+              <small>{module.measurementTarget}</small>
+              <em>{assayStatusLabel(module.status)}</em>
+            </button>)}
+          </div>
         </div>
       </section>
 
