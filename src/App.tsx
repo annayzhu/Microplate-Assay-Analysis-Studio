@@ -162,6 +162,13 @@ function AnnotationPanelToggleIcon({ collapsed }: { collapsed: boolean }) {
   </svg>;
 }
 
+function PreviousStepButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return <button type="button" className="previous-step-button" onClick={onClick}>
+    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="m11.75 4.75-5.25 5.25 5.25 5.25" /></svg>
+    <span>{label}</span>
+  </button>;
+}
+
 function templateIdForPlate(plate: ParsedPlate): string {
   return plateTemplateDefinitions.find((template) => template.rows === plate.rows && template.columns === plate.columns)?.id ?? defaultLayoutTemplateId;
 }
@@ -170,6 +177,43 @@ function plateSwitcherLabel(plate: ParsedPlate, index: number, projectPlates: Pa
   const duplicateName = projectPlates.filter((candidate) => candidate.metadata.plateName === plate.metadata.plateName).length > 1;
   const sourceStem = plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
   return `${index + 1}. ${plate.metadata.plateName}${duplicateName && sourceStem !== plate.metadata.plateName ? ` · ${sourceStem}` : ""}`;
+}
+
+function sourceStem(plate: ParsedPlate): string {
+  return plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
+}
+
+function LayoutPlateTabs({ plates, activePlateIndex, onSelect }: {
+  plates: ParsedPlate[];
+  activePlateIndex: number;
+  onSelect: (index: number) => void;
+}) {
+  const active = plates[activePlateIndex];
+  if (!active) return null;
+  return <section className="layout-plate-context" aria-label="当前板与项目孔板">
+    <div className="layout-active-plate">
+      <span>当前板 {activePlateIndex + 1} / {plates.length}</span>
+      <strong>{active.metadata.plateName}</strong>
+      <small title={active.metadata.sourceFileName}>{active.metadata.sourceFileName}</small>
+    </div>
+    {plates.length > 1 ? <nav className="layout-plate-tabs" aria-label="切换项目孔板">
+      {plates.map((item, index) => {
+        const label = plateSwitcherLabel(item, index, plates);
+        return <button
+          type="button"
+          key={item.plateId ?? `${item.metadata.plateName}-${index}`}
+          className={index === activePlateIndex ? "active" : ""}
+          aria-current={index === activePlateIndex ? "page" : undefined}
+          aria-label={`切换到 ${label}`}
+          title={`${label} · ${item.metadata.sourceFileName}`}
+          onClick={() => onSelect(index)}
+        >
+          <strong>{index + 1}. {item.metadata.plateName}</strong>
+          <small>{sourceStem(item)}</small>
+        </button>;
+      })}
+    </nav> : null}
+  </section>;
 }
 
 export default function App() {
@@ -767,6 +811,7 @@ export default function App() {
         <div className="section-heading split">
           <div><h2>板图与实验注释</h2><p>{activeModule.annotationGuidance} 仪器标签不是实验分组，系统不会根据原始读数高低猜测角色或重复。</p></div>
           <div className="inline-actions">
+            <PreviousStepButton label="返回数据导入" onClick={() => navigateTo("import")} />
             <input ref={layoutInput} hidden type="file" accept=".csv,.tsv,.txt" onChange={(event) => { const file = event.target.files?.[0]; if (file) void previewLayoutFile(file); event.target.value = ""; }} />
             <select className="template-select" value={layoutTemplateId} onChange={(event) => setLayoutTemplateId(event.target.value)} aria-label="板图模板类型">
               {plateTemplateDefinitions.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
@@ -776,6 +821,7 @@ export default function App() {
             <button className="secondary-button" type="button" onClick={() => layoutInput.current?.click()}>导入板布局</button>
           </div>
         </div>
+        <LayoutPlateTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} />
         {layoutImportPreview && pendingLayoutFile ? <section className="layout-import-preview" aria-label="板布局导入预览">
           <div className="layout-import-preview-head">
             <div><h3>板布局导入预览</h3><p title={pendingLayoutFile.name}>{pendingLayoutFile.name}{layoutImportPreview.metadata.plateName ? ` · 来源板：${layoutImportPreview.metadata.plateName}` : ""}</p></div>
@@ -850,7 +896,7 @@ export default function App() {
       {view === "analysis" && plate && useGenericWorkflow && plate.assayData ? <section className="workspace analysis-workspace">
         <div className="section-heading split compact-heading">
           <div><h2>分析与导出</h2><p>按 SkanIt 测量和计算步骤浏览终点、动力学、光谱、标准曲线与多通道归一化结果。</p></div>
-          <span className="readiness ready">{assayStatusLabel(activeModule.status)}</span>
+          <div className="analysis-heading-actions"><PreviousStepButton label="返回板图与注释" onClick={() => navigateTo("layout")} /><span className="readiness ready">{assayStatusLabel(activeModule.status)}</span></div>
         </div>
         <AssayWorkflowPanel module={activeModule} plate={plate} />
         <AssayDataExplorer dataset={plate.assayData} onExport={() => downloadArtifact(createArtifact({ kind: "measurements", plate, wells, scope: "all" }))} onExportProject={downloadProjectFile} />
@@ -859,7 +905,7 @@ export default function App() {
       {view === "analysis" && plate && !useGenericWorkflow ? <section className="workspace analysis-workspace">
         <div className="section-heading split compact-heading">
           <div><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和结果导出都只保留当前展示范围。</p></div>
-          <div className="analysis-heading-actions"><span className={`readiness ${analysis.ready ? "ready" : "review"}`}>{analysis.ready ? "Ready for export" : "Review required"}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></div>
+          <div className="analysis-heading-actions"><PreviousStepButton label="返回板图与注释" onClick={() => navigateTo("layout")} /><span className={`readiness ${analysis.ready ? "ready" : "review"}`}>{analysis.ready ? "Ready for export" : "Review required"}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></div>
         </div>
         <div className="analysis-layout-compact">
           <aside className="panel analysis-side-panel">

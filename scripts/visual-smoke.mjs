@@ -10,6 +10,22 @@ await mkdir(resolve(screenshotDir), { recursive: true });
 const { browser, page, consoleErrors } = await openAcceptanceBrowser();
 const baseUrl = process.env.MICROPLATE_BASE_URL ?? "http://127.0.0.1:4178/";
 
+async function verifyLayoutPreviousStep(browserPage) {
+  const backToImportButton = browserPage.getByRole("button", { name: "返回数据导入" });
+  if (!await backToImportButton.isVisible()) throw new Error("The layout page does not expose a visible previous-step action.");
+  await backToImportButton.click();
+  await browserPage.getByRole("heading", { name: "导入孔板读数" }).waitFor();
+  await browserPage.getByRole("button", { name: "进入板图与注释" }).click();
+}
+
+async function verifyAnalysisPreviousStep(browserPage) {
+  const backToLayoutButton = browserPage.getByRole("button", { name: "返回板图与注释" });
+  if (!await backToLayoutButton.isVisible()) throw new Error("The analysis page does not expose a visible previous-step action.");
+  await backToLayoutButton.click();
+  await browserPage.getByRole("heading", { name: "板图与实验注释" }).waitFor();
+  await browserPage.getByRole("button", { name: "进入分析" }).click();
+}
+
 function normalizationPlate(name, timepoint, blank, values) {
   const wells = [
     { well: "A1", row: "A", column: 1, rawValue: blank, role: "blank" },
@@ -49,7 +65,7 @@ function normalizationPlate(name, timepoint, blank, values) {
 const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
 await writeFile(normalizationProjectPath, JSON.stringify({
   schemaVersion: 3,
-  tool: { id: "microplate-assay-studio", version: "0.6.3" },
+  tool: { id: "microplate-assay-studio", version: "0.6.4" },
   generatedAt: new Date(0).toISOString(),
   experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
   activeModuleId: "cell-viability",
@@ -230,6 +246,7 @@ try {
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
   if (!manualAnalysisText.includes("结果 Excel 同时包含生物学汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
   if (await page.getByRole("button", { name: "技术复孔 CSV" }).count()) throw new Error("Standalone technical-replicate CSV action is still visible.");
+  await verifyAnalysisPreviousStep(page);
   const qcFindingRows = await page.locator(".qc-mini-list li").all();
   const qcFindingHeights = await Promise.all(qcFindingRows.map(async (row) => (await row.boundingBox())?.height ?? Number.NaN));
   if (qcFindingHeights.some((height) => height > 84)) throw new Error(`QC findings are no longer compact: ${qcFindingHeights.join(", ")}.`);
@@ -312,7 +329,9 @@ try {
   let multiFileAppendValidated = false;
   if (process.env.CCK8_XLS) {
     const copiedCck8Path = resolve(screenshotDir, "cck8-day-1-copy.xlsx");
+    const copiedCck8Path2 = resolve(screenshotDir, "cck8-day-2-copy.xlsx");
     await writeFile(copiedCck8Path, await readFile(process.env.CCK8_XLS));
+    await writeFile(copiedCck8Path2, await readFile(process.env.CCK8_XLS));
     await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles([process.env.CCK8_XLS, copiedCck8Path]);
     await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const fixturePreview = await page.locator(".import-preview").innerText();
@@ -334,16 +353,35 @@ try {
     for (const signal of ["CCK-8 / WST-8 · 人工确认", "原始识别：CCK-8 / WST-8"]) {
       if (!reviewedOverview.includes(signal)) throw new Error(`Reviewed assay provenance is missing: ${signal}`);
     }
-    await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles(copiedCck8Path);
+    await page.locator('input[type="file"][accept=".xml,.xlsx,.xls,.skax"]').setInputFiles([copiedCck8Path, copiedCck8Path2]);
     await page.getByRole("heading", { name: "确认导入" }).waitFor();
     const appendPreview = await page.locator(".import-preview").innerText();
     if (!appendPreview.includes("将追加到当前项目") || !appendPreview.includes("保留现有板、注释与分析设置")) throw new Error("Existing project did not default to append mode.");
-    await page.getByRole("button", { name: "确认追加 1 块板" }).click();
-    if (!(await page.locator("body").innerText()).includes("当前项目包含 3 块板")) throw new Error("Appended instrument plate was not added to the current project.");
+    await page.getByRole("button", { name: "确认追加 2 块板" }).click();
+    if (!(await page.locator("body").innerText()).includes("当前项目包含 4 块板")) throw new Error("Appended instrument plates were not added to the current project.");
+    const importPlateTabFontSize = Number.parseFloat(await page.locator(".plate-switcher-buttons button").first().evaluate((element) => getComputedStyle(element).fontSize));
+    if (importPlateTabFontSize > 11.5) throw new Error(`Import plate-tab label is still too large: ${importPlateTabFontSize}px.`);
     multiFileAppendValidated = true;
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-multifile-append.png"), fullPage: true });
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-imported.png"), fullPage: true });
     await page.getByRole("button", { name: "进入板图与注释" }).click();
+    const layoutPlateTabs = page.locator(".layout-plate-tabs button");
+    if (await layoutPlateTabs.count() !== 4) throw new Error(`Layout page did not expose four plate tabs: ${await layoutPlateTabs.count()}.`);
+    const layoutContextText = await page.locator(".layout-plate-context").innerText();
+    for (const signal of ["当前板 3 / 4", "Plate 1", "cck8-day-1-copy"]) {
+      if (!layoutContextText.includes(signal)) throw new Error(`Layout plate identity is missing: ${signal}`);
+    }
+    await page.locator('[data-well="A1"]').click();
+    await page.getByLabel("分组 · Group").fill("Unapplied plate-switch draft");
+    let switchPromptSeen = false;
+    page.once("dialog", async (dialog) => { switchPromptSeen = dialog.message().includes("尚未应用"); await dialog.dismiss(); });
+    await layoutPlateTabs.first().click();
+    if (!switchPromptSeen || await layoutPlateTabs.nth(2).getAttribute("aria-current") !== "page") throw new Error("Plate switching did not protect the unapplied annotation draft.");
+    await page.getByRole("button", { name: "清空填写" }).click();
+    await layoutPlateTabs.first().click();
+    if (await layoutPlateTabs.first().getAttribute("aria-current") !== "page") throw new Error("Layout plate tab did not switch the active plate.");
+    if (!(await page.locator(".layout-active-plate").innerText()).includes("当前板 1 / 4")) throw new Error("Active plate identity did not update after tab switching.");
+    await verifyLayoutPreviousStep(page);
     const layoutText = await page.locator("body").innerText();
     requiredLayoutSignals = ["96孔板 · 96个已测孔", "样本 72", "质控 12", "空白 12", "板图尚未完成"];
     assertSignals(layoutText, requiredLayoutSignals, "Instrument layout");
