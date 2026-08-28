@@ -44,7 +44,7 @@ function csvEscape(value: unknown): string {
   return /[",\n\r]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
 }
 
-function rowsToCsv(headers: string[], rows: Array<Record<string, unknown>>): string {
+export function rowsToCsv(headers: string[], rows: Array<Record<string, unknown>>): string {
   return [headers.join(","), ...rows.map((row) => headers.map((header) => csvEscape(row[header])).join(","))].join("\n");
 }
 
@@ -53,15 +53,21 @@ function artifactName(source: string, suffix: string): string {
   return `${stem || "microplate"}-${suffix}`;
 }
 
-function annotatedWellsCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
-  const headers = ["well", "row", "column", "instrument_label", "role", "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "technical_replicate", "raw_signal", "blank_corrected_signal", "excluded", "notes", "plate_name", "import_source"];
-  return rowsToCsv(headers, result.annotatedWells.map((well) => ({
+export function annotatedWellExportRows(result: CellViabilityAnalysisResult, plate: ParsedPlate): Array<Record<string, unknown>> {
+  return result.annotatedWells.map((well) => ({
     well: well.well, row: well.row, column: well.column, instrument_label: well.instrumentLabel,
     role: well.role, sample_id: well.sampleId, group: well.group, treatment: well.treatment,
     concentration: well.concentration, timepoint: well.timepoint, biological_replicate: well.biologicalReplicate,
     technical_replicate: well.technicalReplicate, raw_signal: well.rawValue, blank_corrected_signal: well.blankCorrectedValue,
-    excluded: well.excluded, notes: well.notes, plate_name: plate.metadata.plateName, import_source: plate.metadata.sourceKind,
-  })));
+    excluded: well.excluded, notes: well.notes, plate_id: plate.plateId ?? "", plate_name: plate.metadata.plateName,
+    source_file: plate.metadata.sourceFileName, import_source: plate.metadata.sourceKind, adapter_id: plate.metadata.adapterId,
+    detection_mode: plate.metadata.detectionMode, signal_unit: plate.metadata.signalUnit,
+  }));
+}
+
+function annotatedWellsCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
+  const headers = ["well", "row", "column", "instrument_label", "role", "sample_id", "group", "treatment", "concentration", "timepoint", "biological_replicate", "technical_replicate", "raw_signal", "blank_corrected_signal", "excluded", "notes", "plate_id", "plate_name", "source_file", "import_source", "adapter_id", "detection_mode", "signal_unit"];
+  return rowsToCsv(headers, annotatedWellExportRows(result, plate));
 }
 
 function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate): string {
@@ -75,15 +81,9 @@ function technicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedP
   })));
 }
 
-function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): string {
+export function biologicalSummaryExportRows(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): Array<Record<string, unknown>> {
   const comparisonByGroup = new Map(result.significanceComparisons.map((comparison) => [[comparison.group, comparison.treatment, comparison.concentration, comparison.timepoint].join("¦"), comparison]));
-  const headers = [
-    "category", "group", "treatment", "concentration", "timepoint", "n_biological", "signal_basis",
-    "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
-    "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference", "normalization_method", "normalization_note",
-    "p_value_vs_control", "fdr_vs_control", "significance", "plate_name", "import_source",
-  ];
-  return rowsToCsv(headers, result.biologicalSummaries.map((row) => {
+  return result.biologicalSummaries.map((row) => {
     const comparison = comparisonByGroup.get([row.group, row.treatment, row.concentration, row.timepoint].join("¦"));
     return {
       category: [row.group, row.concentration, row.timepoint].filter(Boolean).join(" · "),
@@ -98,9 +98,20 @@ function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: Parsed
       normalization_note: row.relativeActivityPercent === null ? "" : "Control mean is treated as an error-free fixed reference; denominator uncertainty is ignored.",
       p_value_vs_control: comparison?.pValue ?? "",
       fdr_vs_control: comparison?.adjustedPValue ?? "", significance: comparison?.label ?? "",
-      plate_name: plate.metadata.plateName, import_source: plate.metadata.sourceKind,
+      plate_id: plate.plateId ?? "", plate_name: plate.metadata.plateName, source_file: plate.metadata.sourceFileName,
+      import_source: plate.metadata.sourceKind, adapter_id: plate.metadata.adapterId,
     };
-  }));
+  });
+}
+
+function biologicalSummaryCsv(result: CellViabilityAnalysisResult, plate: ParsedPlate, analysisConfig?: AnalysisConfig): string {
+  const headers = [
+    "category", "group", "treatment", "concentration", "timepoint", "n_biological", "signal_basis",
+    "blank_corrected_mean", "blank_corrected_sd", "blank_corrected_sem",
+    "relative_to_control_percent", "relative_to_control_sd_percent", "relative_to_control_sem_percent", "normalization_reference", "normalization_method", "normalization_note",
+    "p_value_vs_control", "fdr_vs_control", "significance", "plate_id", "plate_name", "source_file", "import_source", "adapter_id",
+  ];
+  return rowsToCsv(headers, biologicalSummaryExportRows(result, plate, analysisConfig));
 }
 
 function normalizationReadyCsv(result: BaselineNormalizationResult): string {

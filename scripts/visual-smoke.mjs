@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import XLSX from "xlsx-js-style";
 import { assertSignals, dragBetweenWells, manualPlateMatrix, openAcceptanceBrowser } from "./acceptance-harness.mjs";
 
 const screenshotDir = process.argv[2];
@@ -48,7 +49,7 @@ function normalizationPlate(name, timepoint, blank, values) {
 const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
 await writeFile(normalizationProjectPath, JSON.stringify({
   schemaVersion: 3,
-  tool: { id: "microplate-assay-studio", version: "0.6.2" },
+  tool: { id: "microplate-assay-studio", version: "0.6.3" },
   generatedAt: new Date(0).toISOString(),
   experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
   activeModuleId: "cell-viability",
@@ -227,7 +228,8 @@ try {
   await page.getByRole("button", { name: /分析与导出/ }).click();
   const manualAnalysisText = await page.locator("body").innerText();
   if (!manualAnalysisText.includes("ROLE_UNASSIGNED")) throw new Error("Manual-paste analysis did not preserve the unassigned-well QC gate.");
-  if (!manualAnalysisText.includes("只保留语义明确的 blank_corrected_* 基础列")) throw new Error("Analysis UI did not explain the explicit export schema.");
+  if (!manualAnalysisText.includes("结果 Excel 同时包含生物学汇总、孔级数据和板布局")) throw new Error("Analysis UI did not explain the consolidated result workbook.");
+  if (await page.getByRole("button", { name: "技术复孔 CSV" }).count()) throw new Error("Standalone technical-replicate CSV action is still visible.");
   const qcFindingRows = await page.locator(".qc-mini-list li").all();
   const qcFindingHeights = await Promise.all(qcFindingRows.map(async (row) => (await row.boundingBox())?.height ?? Number.NaN));
   if (qcFindingHeights.some((height) => height > 84)) throw new Error(`QC findings are no longer compact: ${qcFindingHeights.join(", ")}.`);
@@ -405,6 +407,17 @@ try {
   await page.getByText("Calculated in Studio · baseline normalization", { exact: true }).waitFor();
   const normalizationStatusText = await normalizationDisclosure.innerText();
   if (!normalizationStatusText.toLowerCase().includes("ready")) throw new Error(`Baseline normalization did not reach ready state in the browser.\n${normalizationStatusText}`);
+  const workbookDownloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "结果 Excel" }).click();
+  const workbookDownload = await workbookDownloadEvent;
+  const workbookPath = await workbookDownload.path();
+  if (!workbookPath || !workbookDownload.suggestedFilename().endsWith("-results-all.xlsx")) throw new Error("Consolidated result workbook was not downloaded.");
+  const workbook = XLSX.read(await readFile(workbookPath), { type: "buffer" });
+  const expectedWorkbookSheets = ["导出说明", "生物学汇总", "孔级数据", "板布局"];
+  if (JSON.stringify(workbook.SheetNames) !== JSON.stringify(expectedWorkbookSheets)) throw new Error(`Unexpected result workbook sheets: ${workbook.SheetNames.join(", ")}`);
+  const workbookSummaryRows = XLSX.utils.sheet_to_json(workbook.Sheets["生物学汇总"]);
+  const workbookWellRows = XLSX.utils.sheet_to_json(workbook.Sheets["孔级数据"]);
+  if (!workbookSummaryRows.length || !workbookWellRows.length) throw new Error("Result workbook sheets are empty.");
   const normalizedDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "标准化结果" }).click();
   const normalizedDownload = await normalizedDownloadEvent;
@@ -433,6 +446,7 @@ try {
     incompleteLayoutGateVisible,
     manualUnassignedGateVisible: manualAnalysisText.includes("ROLE_UNASSIGNED"),
     baselineNormalizationRoundTrip: true,
+    consolidatedWorkbookValidated: true,
     multiFileAppendValidated,
     genericLuxSignals,
     optionalVendorScenarios: { cck8: Boolean(process.env.CCK8_XLS), dualLuciferase: Boolean(process.env.DUAL_LUC_XLS), victor: Boolean(process.env.VICTOR_XLS) },

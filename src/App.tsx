@@ -6,6 +6,7 @@ import { defaultBaselineNormalizationConfig } from "./core/baseline-normalizatio
 import { importInstrumentFiles, importPlateReadings } from "./core/import";
 import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
 import { currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText, type LayoutPatch } from "./core/layout";
+import { createResultWorkbook } from "./core/result-workbook";
 import {
   defaultAnalysisConfig,
   appendPlateWorkspace,
@@ -291,7 +292,6 @@ export default function App() {
   const displayedBiologicalSummaries = workspaceView?.displayedBiologicalSummaries ?? [];
   const displayedSignificanceComparisons = workspaceView?.displayedSignificanceComparisons ?? [];
   const displayedAnnotatedWells = displayedAnalysis.annotatedWells;
-  const displayedTechnicalSummaries = displayedAnalysis.technicalSummaries;
   const exportScope = workspaceView?.exportScope ?? "all";
   const layoutImportPreview = useMemo(() => plate && pendingLayoutFile
     ? previewLayoutText(wells, pendingLayoutFile.text, {
@@ -603,7 +603,7 @@ export default function App() {
     setNotice("当前板布局已导出；文件仅包含孔位注释，不包含原始读数和分析结果。");
   }
 
-  function exportFiles(kind: "wells" | "technical" | "biological" | "package" | "normalization-ready" | "normalized") {
+  function exportFiles(kind: "wells" | "workbook" | "biological" | "package" | "normalization-ready" | "normalized") {
     if (!plate) return;
     if (kind === "package") {
       downloadArtifact(createArtifact({ kind: "analysis-package", plate, plates, wells, analysisConfig: config, result: analysis, normalizationResult: baselineNormalization }));
@@ -618,7 +618,13 @@ export default function App() {
       }));
       return;
     }
-    const artifactKind = kind === "wells" ? "annotated-wells" : kind === "technical" ? "technical-summary" : "biological-summary";
+    if (kind === "workbook") {
+      const workbook = createResultWorkbook({ plate, result: displayedAnalysis, analysisConfig: config, scope: exportScope });
+      downloadBlob(workbook.filename, new Blob([workbook.bytes], { type: workbook.mimeType }));
+      setNotice("结果 Excel 已导出：包含导出说明、生物学汇总、孔级数据和板布局；技术复孔仍用于计算但不单独成表。");
+      return;
+    }
+    const artifactKind = kind === "wells" ? "annotated-wells" : "biological-summary";
     downloadArtifact(createArtifact({ kind: artifactKind, plate, result: displayedAnalysis, scope: exportScope, analysisConfig: config }));
   }
 
@@ -852,7 +858,7 @@ export default function App() {
 
       {view === "analysis" && plate && !useGenericWorkflow ? <section className="workspace analysis-workspace">
         <div className="section-heading split compact-heading">
-          <div><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和导出 CSV 都只保留当前展示范围。</p></div>
+          <div><h2>分析与导出</h2><p>先合并技术复孔，再以生物学重复为统计单位；点选汇总表行后，下方图表、显著性和结果导出都只保留当前展示范围。</p></div>
           <div className="analysis-heading-actions"><span className={`readiness ${analysis.ready ? "ready" : "review"}`}>{analysis.ready ? "Ready for export" : "Review required"}</span><button type="button" className="secondary-button mini" onClick={downloadProjectFile}>保存可复现项目</button></div>
         </div>
         <div className="analysis-layout-compact">
@@ -899,11 +905,11 @@ export default function App() {
 
           <section className="panel table-panel summary-panel">
             <div className="panel-head summary-panel-head">
-              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 汇总 CSV 只保留语义明确的 blank_corrected_* 基础列；relative_to_control_* 仅表示相对 Control 的派生结果。</p></div>
+              <div><h3>生物学汇总表</h3><p>{selectedSummaryKeys.size ? `当前展示 ${displayedBiologicalSummaries.length} 行；显著性按当前点选范围重新计算。` : "点击行后，下方图表、显著性和导出内容只显示所选行。"} 结果 Excel 同时包含生物学汇总、孔级数据和板布局；relative_to_control_* 仅表示相对 Control 的派生结果。</p></div>
               <div className="summary-head-actions">
                 {selectedSummaryKeys.size ? <button type="button" className="secondary-button mini" onClick={() => setWorkspace((current) => current ? transitionPlateWorkspace(current, { type: "clear-summary-selection" }) : current)}>显示全部</button> : null}
+                <button type="button" className="primary-button mini" disabled={!displayedBiologicalSummaries.length} onClick={() => exportFiles("workbook")}>结果 Excel</button>
                 <button type="button" className="secondary-button mini" disabled={!displayedAnnotatedWells.length} onClick={() => exportFiles("wells")}>孔级 CSV</button>
-                <button type="button" className="secondary-button mini" disabled={!displayedTechnicalSummaries.length} onClick={() => exportFiles("technical")}>技术复孔 CSV</button>
                 <button type="button" className="secondary-button mini" disabled={!displayedBiologicalSummaries.length} onClick={() => exportFiles("biological")}>汇总 CSV</button>
                 <button type="button" className="secondary-button mini" title="始终导出完整项目范围及 QC 状态，确保后续时间点包含其 baseline 依赖。" disabled={!baselineNormalization.normalizationReadyRows.length} onClick={() => exportFiles("normalization-ready")}>标准化准备表</button>
                 <button type="button" className="secondary-button mini" disabled={displayedBaselineNormalization.status !== "ready" || !displayedBaselineNormalization.normalizedRows.length} onClick={() => exportFiles("normalized")}>标准化结果</button>
