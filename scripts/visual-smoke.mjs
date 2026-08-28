@@ -291,6 +291,14 @@ try {
   const numericHeaderAlign = await page.locator(".summary-table-scroll th").nth(5).evaluate((element) => getComputedStyle(element).textAlign);
   if (selectionHeaderAlign !== "center") throw new Error(`Summary selection column is not centered: ${selectionHeaderAlign}.`);
   if (numericHeaderAlign !== "right") throw new Error(`Summary numeric columns are not right-aligned: ${numericHeaderAlign}.`);
+  const chartSurface = await page.locator(".compact-chart-panel").evaluate((element) => {
+    const panel = getComputedStyle(element);
+    const heading = getComputedStyle(element.querySelector("h3"));
+    return { background: panel.backgroundColor, heading: heading.color, shadow: panel.boxShadow };
+  });
+  if (chartSurface.background !== "rgb(12, 43, 46)") throw new Error(`Summary chart did not receive the premium dark stage: ${chartSurface.background}.`);
+  if (chartSurface.heading !== "rgb(242, 238, 231)") throw new Error(`Summary chart heading contrast drifted: ${chartSurface.heading}.`);
+  if (chartSurface.shadow === "none") throw new Error("Summary chart lost its authored elevation.");
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-analysis-aligned-wide.png"), fullPage: true });
   await page.setViewportSize({ width: 1100, height: 1000 });
   const intermediateActionTops = await Promise.all((await page.locator(".summary-head-actions button").all()).map(async (button) => (await button.boundingBox())?.y ?? Number.NaN));
@@ -499,6 +507,10 @@ try {
   if (!workbookSummaryRows.length || !workbookTechnicalRows.length || !workbookWellRows.length) throw new Error("Result workbook sheets are empty.");
   if (!("blank_corrected_biological_mean" in workbookSummaryRows[0])) throw new Error("Biological mean is not explicitly named in the result workbook.");
   if (!("blank_corrected_technical_mean" in workbookTechnicalRows[0])) throw new Error("Technical-replicate mean is missing from the result workbook.");
+  const renderedBar = page.locator(".compact-chart-panel .chart-bar").first();
+  if (!await renderedBar.count()) throw new Error("Summary chart did not render a data bar for visual verification.");
+  const renderedBarFill = await renderedBar.getAttribute("fill");
+  if (!renderedBarFill?.startsWith("url(#summary-bar-")) throw new Error(`Summary chart bar is missing its jade material treatment: ${renderedBarFill}.`);
   const normalizedDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "标准化结果" }).click();
   const normalizedDownload = await normalizedDownloadEvent;

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { BiologicalSummary } from "../core/types";
 
 export type SummaryChartErrorMetric = "sem" | "sd";
@@ -24,6 +25,7 @@ function summaryError(row: BiologicalSummary, normalized: boolean, metric: Summa
 }
 
 export function SummaryChart({ rows, normalized, compact = false, errorMetric = "sem", yAxisLabel = "Blank-corrected signal" }: SummaryChartProps) {
+  const barGradientId = `summary-bar-${useId().replace(/:/g, "")}`;
   const points = rows.map((row) => ({
     row,
     label: label(row),
@@ -51,6 +53,12 @@ export function SummaryChart({ rows, normalized, compact = false, errorMetric = 
   return <div className="summary-chart">
     <div className="chart-frame">
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biological summary chart" style={{ minWidth: width }}>
+        <defs>
+          <linearGradient id={barGradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" className="chart-bar-stop-top" />
+            <stop offset="100%" className="chart-bar-stop-bottom" />
+          </linearGradient>
+        </defs>
         {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
           const value = minimum + domainRange * fraction;
           return <g key={fraction}>
@@ -67,9 +75,11 @@ export function SummaryChart({ rows, normalized, compact = false, errorMetric = 
           const errorTopY = y(point.value + error);
           const errorBottomY = y(point.value - error);
           const valueLabelY = Math.max(12, errorTopY - valueLabelGap);
-          return <g key={point.row.key}>
+          const barCrownY = Math.min(barTop, zeroY) + 1;
+          return <g key={point.row.key} className="chart-bar-group">
             <title>{`${index + 1}. ${point.label}`}</title>
-            <rect x={center - barWidth / 2} y={Math.min(barTop, zeroY)} width={barWidth} height={Math.abs(zeroY - barTop)} rx="4" className="chart-bar" />
+            <rect x={center - barWidth / 2} y={Math.min(barTop, zeroY)} width={barWidth} height={Math.abs(zeroY - barTop)} rx="6" className="chart-bar" fill={`url(#${barGradientId})`} />
+            <line x1={center - barWidth / 2 + 4} x2={center + barWidth / 2 - 4} y1={barCrownY} y2={barCrownY} className="chart-bar-crown" />
             {error > 0 ? <>
               <line x1={center} x2={center} y1={errorTopY} y2={errorBottomY} className="chart-error" />
               <line x1={center - 7} x2={center + 7} y1={errorTopY} y2={errorTopY} className="chart-error" />
