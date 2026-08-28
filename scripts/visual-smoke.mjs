@@ -296,9 +296,9 @@ try {
     const heading = getComputedStyle(element.querySelector("h3"));
     return { background: panel.backgroundColor, heading: heading.color, shadow: panel.boxShadow };
   });
-  if (chartSurface.background !== "rgb(12, 43, 46)") throw new Error(`Summary chart did not receive the premium dark stage: ${chartSurface.background}.`);
-  if (chartSurface.heading !== "rgb(242, 238, 231)") throw new Error(`Summary chart heading contrast drifted: ${chartSurface.heading}.`);
-  if (chartSurface.shadow === "none") throw new Error("Summary chart lost its authored elevation.");
+  if (chartSurface.background !== "rgb(255, 255, 255)") throw new Error(`Summary chart did not receive the integrated light surface: ${chartSurface.background}.`);
+  if (chartSurface.heading !== "rgb(63, 71, 67)") throw new Error(`Summary chart heading contrast drifted: ${chartSurface.heading}.`);
+  if (chartSurface.shadow !== "none") throw new Error(`Summary chart regained an unnecessary shadow: ${chartSurface.shadow}.`);
   await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-analysis-aligned-wide.png"), fullPage: true });
   await page.setViewportSize({ width: 1100, height: 1000 });
   const intermediateActionTops = await Promise.all((await page.locator(".summary-head-actions button").all()).map(async (button) => (await button.boundingBox())?.y ?? Number.NaN));
@@ -509,8 +509,12 @@ try {
   if (!("blank_corrected_technical_mean" in workbookTechnicalRows[0])) throw new Error("Technical-replicate mean is missing from the result workbook.");
   const renderedBar = page.locator(".compact-chart-panel .chart-bar").first();
   if (!await renderedBar.count()) throw new Error("Summary chart did not render a data bar for visual verification.");
-  const renderedBarFill = await renderedBar.getAttribute("fill");
-  if (!renderedBarFill?.startsWith("url(#summary-bar-")) throw new Error(`Summary chart bar is missing its jade material treatment: ${renderedBarFill}.`);
+  const renderedBarStyle = await renderedBar.evaluate((element) => ({
+    fill: getComputedStyle(element).fill,
+    valueFontSize: getComputedStyle(element.parentElement?.querySelector(".chart-value") ?? element).fontSize,
+  }));
+  if (renderedBarStyle.fill !== "rgb(63, 113, 114)") throw new Error(`Summary chart bar color drifted: ${renderedBarStyle.fill}.`);
+  if (renderedBarStyle.valueFontSize !== "9px") throw new Error(`Summary chart value labels are no longer compact: ${renderedBarStyle.valueFontSize}.`);
   const normalizedDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "标准化结果" }).click();
   const normalizedDownload = await normalizedDownloadEvent;
