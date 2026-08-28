@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { aggregatePlate, createPlateAggregate, replaceWellAnnotations } from "../src/core/plate-aggregate";
 import {
+  appendPlateWorkspace,
   openPlateWorkspace,
   planWorkspaceImport,
   readPlateWorkspace,
@@ -24,6 +25,28 @@ describe("Plate workspace acceptance scenarios", () => {
     expect(readPlateWorkspace(workspace).wells.find((well) => well.well === "C1")?.group).toBe("Drug");
     workspace = transitionPlateWorkspace(workspace, { type: "select-plate", index: 0 });
     expect(readPlateWorkspace(workspace).wells.find((well) => well.well === "C1")?.group).toBe("Dose 10");
+  });
+
+  it("appends a separately imported plate without replacing project state", () => {
+    let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch([fixturePlate("Day 0")]), "cell-viability", true));
+    workspace = transitionPlateWorkspace(workspace, { type: "select-wells", wellIds: new Set(["C1"]), anchor: "C1" });
+    workspace = transitionPlateWorkspace(workspace, { type: "update-selected-annotations", update: (annotation) => ({ ...annotation, notes: "preserve-me" }) });
+    workspace = transitionPlateWorkspace(workspace, {
+      type: "set-analysis-config",
+      config: { ...workspace.analysisConfig, controlGroup: "Control", relativeToControlEnabled: true },
+      touched: true,
+    });
+
+    workspace = appendPlateWorkspace(workspace, planWorkspaceImport(fixtureBatch([fixturePlate("Day 1")]), "cell-viability", true));
+    const projectPlates = workspacePlates(workspace);
+
+    expect(projectPlates).toHaveLength(2);
+    expect(new Set(projectPlates.map((plate) => plate.plateId)).size).toBe(2);
+    expect(projectPlates[0].wells.find((well) => well.well === "C1")?.notes).toBe("preserve-me");
+    expect(projectPlates[0].wells.map((well) => well.rawValue)).toEqual(fixturePlate("Day 0").wells.map((well) => well.rawValue));
+    expect(workspace.activePlateIndex).toBe(1);
+    expect(workspace.analysisConfig.controlGroup).toBe("Control");
+    expect(workspace.analysisConfig.relativeToControlEnabled).toBe(true);
   });
 
   it("uses the current summary selection for analysis and export scope", () => {

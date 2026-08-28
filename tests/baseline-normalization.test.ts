@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createArtifact, parseProjectArtifact } from "../src/core/artifacts";
 import { analyzeBaselineNormalization } from "../src/core/baseline-normalization";
 import {
+  appendPlateWorkspace,
   defaultAnalysisConfig,
   openPlateWorkspace,
   planWorkspaceImport,
@@ -75,6 +76,34 @@ function multiPlateWorkspace() {
 }
 
 describe("project-level baseline normalization", () => {
+  it("becomes ready after a later timepoint plate is appended from a separate import", () => {
+    const day0 = timepointPlate("Plate Day 0", "Day 0", 0.1, { Control: [1, 1.2, 0.8], Drug: [1, 2, 4] });
+    const day1 = timepointPlate("Plate Day 1", "Day 1", 0.2, { Control: [1.4, 1.5, 1.3], Drug: [2, 6, 8] });
+    let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch([day0]), "cell-viability", true));
+    workspace = transitionPlateWorkspace(workspace, {
+      type: "set-analysis-config",
+      config: { ...defaultAnalysisConfig, controlGroup: "Control", baselineNormalization: normalization },
+      touched: true,
+    });
+    workspace = appendPlateWorkspace(workspace, planWorkspaceImport(fixtureBatch([day1]), "cell-viability", true));
+
+    const result = readPlateWorkspace(workspace).baselineNormalization;
+    expect(result.status).toBe("ready");
+    expect(result.normalizationReadyRows.map((row) => row.plateName)).toEqual(expect.arrayContaining(["Plate Day 0", "Plate Day 1"]));
+    expect(result.normalizationReadyRows.find((row) => row.plateName === "Plate Day 1")?.blankMean).toBeCloseTo(0.2);
+
+    const artifact = createArtifact({
+      kind: "project",
+      plates: workspacePlates(workspace),
+      experiment: { name: "Appended time course", operator: "", date: "", notes: "" },
+      activeModuleId: "cell-viability",
+      analysisConfig: workspace.analysisConfig,
+    });
+    const restored = parseProjectArtifact(artifact.content, "appended-time-course.json");
+    expect(restored.plates).toHaveLength(2);
+    expect(restored.restoredAnalysisConfig?.baselineNormalization?.baselineTimepoint).toBe("Day 0");
+  });
+
   it("blank-corrects each plate, collapses technical wells, then summarizes matched biological ratios", () => {
     const workspace = multiPlateWorkspace();
     const view = readPlateWorkspace(workspace);

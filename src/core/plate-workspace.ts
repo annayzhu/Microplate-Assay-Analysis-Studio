@@ -41,6 +41,12 @@ export type WorkspaceImportPlan = {
   readonly includedPlateIndexes: ReadonlySet<number>;
 };
 
+export type WorkspaceImportOptions = {
+  includedPlateIndexes?: ReadonlySet<number>;
+  moduleIds?: readonly AssayModuleId[];
+  moduleSelectionTouched?: boolean;
+};
+
 export type PlateWorkspace = {
   readonly plates: readonly PlateAggregate[];
   readonly activePlateIndex: number;
@@ -97,6 +103,18 @@ function stablePlateId(plate: ParsedPlate, importIndex: number): string {
   return `plate-${importIndex + 1}-${(hash >>> 0).toString(36)}`;
 }
 
+function collisionSafePlateId(plate: ParsedPlate, importIndex: number, usedIds: Set<string>): string {
+  const baseId = stablePlateId(plate, importIndex);
+  let candidate = baseId;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
 function looksLikeControlGroup(group: string): boolean {
   return /(control|vehicle|mock|dmso|nc|negative|untreated|ctrl|对照|陰性|阴性)/i.test(group);
 }
@@ -148,20 +166,21 @@ export function planWorkspaceImport(
   };
 }
 
-export function openPlateWorkspace(
+function materializeImportedPlates(
   plan: WorkspaceImportPlan,
-  options?: { includedPlateIndexes?: ReadonlySet<number>; moduleIds?: readonly AssayModuleId[]; moduleSelectionTouched?: boolean },
-): PlateWorkspace {
+  options: WorkspaceImportOptions | undefined,
+  usedPlateIds: Set<string>,
+): PlateAggregate[] {
   const includedPlateIndexes = options?.includedPlateIndexes ?? plan.includedPlateIndexes;
   const moduleIds = options?.moduleIds ?? plan.moduleIds;
   const included = plan.batch.plates.map((plate, index) => ({ plate, index })).filter(({ index }) => includedPlateIndexes.has(index));
   if (!included.length) throw new Error("至少选择一块板后才能载入。 ");
-  const plates = included.map(({ plate, index }) => {
+  return included.map(({ plate, index }) => {
     const detected = detectedAssayModule(plate);
     const confirmedModuleId = moduleIds[index] ?? "unknown";
-    const nextPlate: ParsedPlate = {
+    return createPlateAggregate({
       ...plate,
-      plateId: stablePlateId(plate, index),
+      plateId: collisionSafePlateId(plate, index, usedPlateIds),
       metadata: {
         ...plate.metadata,
         detectedAssayModuleId: detected,
@@ -171,10 +190,17 @@ export function openPlateWorkspace(
           ? "project-restored"
           : assignmentDecision(plan.batch.sourceKind, confirmedModuleId, detected, options?.moduleSelectionTouched ?? false),
       },
-    };
-    return createPlateAggregate(nextPlate);
+    });
   });
-  const firstModuleId = aggregatePlate(plates[0]).metadata.confirmedAssayModuleId ?? moduleIds[included[0].index] ?? "unknown";
+}
+
+export function openPlateWorkspace(
+  plan: WorkspaceImportPlan,
+  options?: WorkspaceImportOptions,
+): PlateWorkspace {
+  const plates = materializeImportedPlates(plan, options, new Set());
+  const firstPlate = aggregatePlate(plates[0]);
+  const firstModuleId = firstPlate.metadata.confirmedAssayModuleId ?? detectedAssayModule(firstPlate);
   return normalizeWorkspace({
     plates,
     activePlateIndex: 0,
@@ -192,6 +218,25 @@ export function openPlateWorkspace(
     } : defaultAnalysisConfig,
     controlGroupTouched: Boolean(plan.batch.restoredAnalysisConfig?.controlGroup),
     experiment: plan.batch.experiment ?? { name: "", operator: "", date: "", notes: "" },
+  });
+}
+
+export function appendPlateWorkspace(
+  workspace: PlateWorkspace,
+  plan: WorkspaceImportPlan,
+  options?: WorkspaceImportOptions,
+): PlateWorkspace {
+  const usedPlateIds = new Set(workspace.plates.map((plate) => aggregatePlate(plate).plateId).filter((plateId): plateId is string => Boolean(plateId)));
+  const appended = materializeImportedPlates(plan, options, usedPlateIds);
+  const firstAppended = aggregatePlate(appended[0]);
+  return normalizeWorkspace({
+    ...workspace,
+    plates: [...workspace.plates, ...appended],
+    activePlateIndex: workspace.plates.length,
+    selectedModuleId: firstAppended.metadata.confirmedAssayModuleId ?? detectedAssayModule(firstAppended),
+    selectedWellIds: new Set(),
+    selectionAnchor: null,
+    selectedSummaryKeys: new Set(),
   });
 }
 
