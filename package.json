@@ -1,6 +1,6 @@
 {
   "name": "microplate-assay-studio",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:offline": "npm run build && node scripts/build-offline.mjs",
+    "build:offline": "MICROPLATE_OFFLINE_BUILD=1 npm run build && node scripts/build-offline.mjs",
     "build:sites": "npm run build:offline && node scripts/build-sites.mjs",
     "typecheck": "tsc -b --pretty false",
     "test:unit": "vitest run",

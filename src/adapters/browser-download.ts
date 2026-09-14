@@ -1,4 +1,4 @@
-import type { ReproducibleArtifact } from "../core/artifacts";
+import type { ReproducibleArtifact } from "../core/artifact-file";
 
 export function downloadArtifact(artifact: ReproducibleArtifact): void {
   downloadBlob(artifact.filename, new Blob([artifact.content], { type: `${artifact.mimeType};charset=utf-8` }));

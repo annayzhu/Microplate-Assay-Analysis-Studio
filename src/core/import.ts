@@ -1,4 +1,4 @@
-import { parseProjectArtifact } from "./artifacts";
+import { parseProjectArtifact } from "./project-file";
 import { detectedAssayModule } from "./assay-workflows";
 import {
   parsePastedPlateReadings,
