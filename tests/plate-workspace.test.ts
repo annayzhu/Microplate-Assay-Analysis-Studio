@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aggregatePlate, createPlateAggregate, replaceWellAnnotations } from "../src/core/plate-aggregate";
+import { createPlateDocument, projectPlate, replaceDocumentAnnotations } from "../src/core/plate-aggregate";
 import {
   appendPlateWorkspace,
   openPlateWorkspace,
@@ -33,7 +33,7 @@ describe("Plate workspace acceptance scenarios", () => {
     workspace = transitionPlateWorkspace(workspace, { type: "update-selected-annotations", update: (annotation) => ({ ...annotation, notes: "preserve-me" }) });
     workspace = transitionPlateWorkspace(workspace, {
       type: "set-analysis-config",
-      config: { ...workspace.analysisConfig, controlGroup: "Control", relativeToControlEnabled: true },
+      config: { ...workspace.project.analysisConfig, controlGroup: "Control", relativeToControlEnabled: true },
       touched: true,
     });
 
@@ -44,9 +44,9 @@ describe("Plate workspace acceptance scenarios", () => {
     expect(new Set(projectPlates.map((plate) => plate.plateId)).size).toBe(2);
     expect(projectPlates[0].wells.find((well) => well.well === "C1")?.notes).toBe("preserve-me");
     expect(projectPlates[0].wells.map((well) => well.rawValue)).toEqual(fixturePlate("Day 0").wells.map((well) => well.rawValue));
-    expect(workspace.activePlateIndex).toBe(1);
-    expect(workspace.analysisConfig.controlGroup).toBe("Control");
-    expect(workspace.analysisConfig.relativeToControlEnabled).toBe(true);
+    expect(workspace.session.activePlateIndex).toBe(1);
+    expect(workspace.project.analysisConfig.controlGroup).toBe("Control");
+    expect(workspace.project.analysisConfig.relativeToControlEnabled).toBe(true);
   });
 
   it("uses the current summary selection for analysis and export scope", () => {
@@ -70,18 +70,18 @@ describe("Plate workspace acceptance scenarios", () => {
 
     workspace = transitionPlateWorkspace(workspace, { type: "select-plate", index: 1 });
 
-    expect(workspace.selectedSummaryKeys.size).toBe(0);
-    expect(workspace.selectedWellIds.size).toBe(0);
-    expect(workspace.selectionAnchor).toBeNull();
+    expect(workspace.session.selectedSummaryKeys.size).toBe(0);
+    expect(workspace.session.selectedWellIds.size).toBe(0);
+    expect(workspace.session.selectionAnchor).toBeNull();
     expect(readPlateWorkspace(workspace).exportScope).toBe("all");
   });
 
   it("keeps raw measurements immutable while annotations change", () => {
-    const aggregate = createPlateAggregate(fixturePlate());
-    const projected = aggregatePlate(aggregate);
+    const aggregate = createPlateDocument(fixturePlate());
+    const projected = projectPlate(aggregate);
     projected.wells[2] = { ...projected.wells[2], rawValue: 99, notes: "changed" };
-    expect(() => replaceWellAnnotations(aggregate, projected.wells)).toThrow(/不能通过孔注释修改原始读数/);
-    expect(aggregatePlate(aggregate).wells[2].rawValue).toBe(0.5);
+    expect(() => replaceDocumentAnnotations(aggregate, projected.wells)).toThrow(/不能通过孔注释修改原始读数/);
+    expect(projectPlate(aggregate).wells[2].rawValue).toBe(0.5);
   });
 
   it("stores a reviewed assay method separately from source inference", () => {
@@ -123,12 +123,49 @@ describe("Plate workspace acceptance scenarios", () => {
     let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch(), "cell-viability", true));
     workspace = transitionPlateWorkspace(workspace, {
       type: "set-analysis-config",
-      config: { ...workspace.analysisConfig, controlGroup: "Drug" },
+      config: { ...workspace.project.analysisConfig, controlGroup: "Drug" },
       touched: true,
     });
     workspace = transitionPlateWorkspace(workspace, { type: "select-wells", wellIds: new Set(["C1"]), anchor: "C1" });
     workspace = transitionPlateWorkspace(workspace, { type: "update-selected-annotations", update: (annotation) => ({ ...annotation, notes: "reviewed" }) });
-    expect(workspace.analysisConfig.controlGroup).toBe("Drug");
-    expect(workspace.controlGroupTouched).toBe(true);
+    expect(workspace.project.analysisConfig.controlGroup).toBe("Drug");
+    expect(workspace.project.controlGroupTouched).toBe(true);
+  });
+
+  it("keeps interaction state outside the scientific document and reuses derived results", () => {
+    const opened = openPlateWorkspace(planWorkspaceImport(fixtureBatch(), "cell-viability", true));
+    const initialProject = opened.project;
+    const initialView = readPlateWorkspace(opened);
+
+    const selected = transitionPlateWorkspace(opened, {
+      type: "select-wells",
+      wellIds: new Set(["A1", "A2"]),
+      anchor: "A2",
+    });
+    const selectedView = readPlateWorkspace(selected);
+
+    expect(selected.project).toBe(initialProject);
+    expect(selected.project.revision).toBe(opened.project.revision);
+    expect(selectedView.analysis).toBe(initialView.analysis);
+    expect(selectedView.baselineNormalization).toBe(initialView.baselineNormalization);
+
+    const edited = transitionPlateWorkspace(selected, {
+      type: "update-selected-annotations",
+      update: (annotation) => ({ ...annotation, notes: "scientific edit" }),
+    });
+    expect(edited.project).not.toBe(initialProject);
+    expect(edited.project.revision).toBe(opened.project.revision + 1);
+    expect(readPlateWorkspace(edited).analysis).not.toBe(initialView.analysis);
+  });
+
+  it("changes executable analysis behavior when the assay module changes", () => {
+    let workspace = openPlateWorkspace(planWorkspaceImport(fixtureBatch(), "cell-viability", true));
+    expect(readPlateWorkspace(workspace).assayExecution.kind).toBe("cell-viability");
+
+    workspace = transitionPlateWorkspace(workspace, { type: "assign-active-assay", moduleId: "protein-quant" });
+    expect(readPlateWorkspace(workspace).assayExecution.kind).toBe("measurement-preview");
+
+    workspace = transitionPlateWorkspace(workspace, { type: "assign-active-assay", moduleId: "elisa" });
+    expect(readPlateWorkspace(workspace).assayExecution.kind).toBe("planned");
   });
 });

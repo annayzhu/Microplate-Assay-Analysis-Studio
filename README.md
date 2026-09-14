@@ -1,6 +1,6 @@
 # Microplate Assay Studio
 
-面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.6.9，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
+面向酶标仪/多功能微孔板读数仪的一体化分析工作台。当前版本为 v0.7.0，使用真实 Thermo Scientific Varioskan LUX / SkanIt XML、XLSX 和旧版 VICTOR XLS 数据开发。
 
 ## 工具定位
 
@@ -110,16 +110,20 @@ npm run test:unit
 
 ## 代码结构
 
-项目采用“深 module + adapter”的结构，interface 同时作为测试表面：
+项目采用“Project Document + session + executable assay module”的结构：
 
-- `src/core/plate-workspace.ts`：Plate workspace 的状态转换、分析范围和派生视图；React 不再拥有科研工作流策略。
-- `src/core/plate-aggregate.ts`：原始读数与可编辑孔注释的 canonical aggregate；所有投影和同步规则集中在这一处。
+- `src/core/plate-workspace.ts`：持久化 Project Document、临时 UI session、状态转换、缓存后的分析视图；选择孔位不会触发科学结果重算。
+- `src/core/plate-aggregate.ts`：不可变原始读数、可编辑注释与投影视图；原始值只保存一份。
+- `src/core/assays/registry.ts`：实验模块的可执行注册表；每个模块明确返回完整分析、通用测量预览或计划中状态。
 - `src/core/import.ts`：统一导入 interface；浏览器 `File` 与测试内存文件都通过相同 seam。
 - `src/core/instruments/registry.ts`：厂商格式 adapters、格式探测和结构化诊断。
-- `src/core/artifacts.ts`：版本化 project、分析包及 CSV artifact 的单一 schema/version 来源。
+- `src/core/project-file.ts`：版本化项目文件、兼容校验和恢复逻辑。
+- `src/core/result-tables.ts` 与 `src/core/result-export.ts`：科研结果行模型和 CSV 文件生成；不承担项目持久化。
 - `src/core/result-workbook.ts`：结果 Excel 的工作表 schema、板布局矩阵和可读格式。
+- `src/features/`：导入、布局编辑和反馈等临时界面会话；不拥有科研计算规则。
 - `src/adapters/browser-download.ts`：浏览器下载副作用，不包含科研计算。
-- `scripts/acceptance-harness.mjs`：在线与离线页面测试共用的浏览器 adapter、fixture 和断言工具。
+- `scripts/browser/`：集中合成 fixture 和带场景名称的验收报告；视觉测试验证结构与语义，不锁死装饰性 CSS 数值。
+- `scripts/acceptance-harness.mjs`：在线与离线页面测试共用的浏览器 adapter 与交互工具。
 - `CONTEXT.md`：领域词汇；`docs/adr/`：需要长期保留的架构决策。
 
 维护时优先从上述 interface 编写行为测试。实现被新 interface 测试覆盖后，应替换旧测试和旧路径，不在旁边长期叠加兼容 helper。

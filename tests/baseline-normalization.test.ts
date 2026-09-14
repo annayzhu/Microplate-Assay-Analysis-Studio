@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createArtifact, parseProjectArtifact } from "../src/core/artifacts";
+import { createProjectArtifact, parseProjectArtifact } from "../src/core/project-file";
+import { createResultArtifact } from "../src/core/result-export";
 import { analyzeBaselineNormalization } from "../src/core/baseline-normalization";
 import {
   appendPlateWorkspace,
@@ -92,12 +93,11 @@ describe("project-level baseline normalization", () => {
     expect(result.normalizationReadyRows.map((row) => row.plateName)).toEqual(expect.arrayContaining(["Plate Day 0", "Plate Day 1"]));
     expect(result.normalizationReadyRows.find((row) => row.plateName === "Plate Day 1")?.blankMean).toBeCloseTo(0.2);
 
-    const artifact = createArtifact({
-      kind: "project",
+    const artifact = createProjectArtifact({
       plates: workspacePlates(workspace),
       experiment: { name: "Appended time course", operator: "", date: "", notes: "" },
       activeModuleId: "cell-viability",
-      analysisConfig: workspace.analysisConfig,
+      analysisConfig: workspace.project.analysisConfig,
     });
     const restored = parseProjectArtifact(artifact.content, "appended-time-course.json");
     expect(restored.plates).toHaveLength(2);
@@ -132,8 +132,8 @@ describe("project-level baseline normalization", () => {
     const workspace = multiPlateWorkspace();
     const view = readPlateWorkspace(workspace);
     const plates = workspacePlates(workspace);
-    const ready = createArtifact({ kind: "normalization-ready", plates, result: view.baselineNormalization, sourceName: "cck8-timecourse" });
-    const normalized = createArtifact({ kind: "normalized-results", plates, result: view.baselineNormalization, sourceName: "cck8-timecourse" });
+    const ready = createResultArtifact({ kind: "normalization-ready", plates, result: view.baselineNormalization, sourceName: "cck8-timecourse" });
+    const normalized = createResultArtifact({ kind: "normalized-results", plates, result: view.baselineNormalization, sourceName: "cck8-timecourse" });
 
     expect(ready.content).toContain("blank_corrected_biological_value");
     expect(ready.content).toContain("baseline_candidate");
@@ -142,12 +142,11 @@ describe("project-level baseline normalization", () => {
     expect(normalized.content).toContain("baseline_timepoint,normalization_method,pairing_status");
     expect(normalized.content).toContain("normalized_mean,normalized_sd,normalized_sem,propagated_se");
 
-    const project = createArtifact({
-      kind: "project",
+    const project = createProjectArtifact({
       plates,
       experiment: { name: "CCK8 time course", operator: "", date: "", notes: "" },
       activeModuleId: "cell-viability",
-      analysisConfig: workspace.analysisConfig,
+      analysisConfig: workspace.project.analysisConfig,
     });
     const restored = parseProjectArtifact(project.content, "cck8-project.json");
     expect(restored.restoredAnalysisConfig?.baselineNormalization).toEqual(normalization);
@@ -158,7 +157,7 @@ describe("project-level baseline normalization", () => {
     workspace = transitionPlateWorkspace(workspace, {
       type: "set-analysis-config",
       config: {
-        ...workspace.analysisConfig,
+        ...workspace.project.analysisConfig,
         baselineNormalization: { ...normalization, method: "ratio-of-means" },
       },
     });
@@ -204,7 +203,7 @@ describe("project-level baseline normalization", () => {
 
     workspace = transitionPlateWorkspace(workspace, {
       type: "set-analysis-config",
-      config: { ...workspace.analysisConfig, baselineNormalization: normalization },
+      config: { ...workspace.project.analysisConfig, baselineNormalization: normalization },
     });
     const explicit = readPlateWorkspace(workspace).baselineNormalization;
     expect(explicit.status).toBe("blocked");
@@ -216,7 +215,7 @@ describe("project-level baseline normalization", () => {
     const enabledView = readPlateWorkspace(enabledWorkspace);
     const disabledWorkspace = transitionPlateWorkspace(enabledWorkspace, {
       type: "set-analysis-config",
-      config: { ...enabledWorkspace.analysisConfig, baselineNormalization: { ...normalization, enabled: false } },
+      config: { ...enabledWorkspace.project.analysisConfig, baselineNormalization: { ...normalization, enabled: false } },
     });
     const disabledView = readPlateWorkspace(disabledWorkspace);
     expect(disabledView.baselineNormalization.status).toBe("disabled");
@@ -228,7 +227,7 @@ describe("project-level baseline normalization", () => {
     let workspace = multiPlateWorkspace();
     workspace = transitionPlateWorkspace(workspace, {
       type: "set-analysis-config",
-      config: { ...workspace.analysisConfig, baselineNormalization: { ...normalization, method: "fixed-baseline-scaling" } },
+      config: { ...workspace.project.analysisConfig, baselineNormalization: { ...normalization, method: "fixed-baseline-scaling" } },
     });
     const row = readPlateWorkspace(workspace).baselineNormalization.normalizedRows.find((item) => item.group === "Drug" && item.timepoint === "Day 1");
     expect(row?.pairingStatus).toBe("fixed-reference");
@@ -271,7 +270,7 @@ describe("project-level baseline normalization", () => {
 
   it("supports percent output with a definitional baseline of 100", () => {
     let workspace = multiPlateWorkspace();
-    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.analysisConfig, baselineNormalization: { ...normalization, scale: "percent" } } });
+    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.project.analysisConfig, baselineNormalization: { ...normalization, scale: "percent" } } });
     const baseline = readPlateWorkspace(workspace).baselineNormalization.normalizedRows.find((row) => row.group === "Drug" && row.timepoint === "Day 0");
     expect(baseline).toMatchObject({ normalizedMean: 100, normalizedSd: 0, normalizedSem: 0, ci95Low: 100, ci95High: 100 });
   });
@@ -286,7 +285,7 @@ describe("project-level baseline normalization", () => {
     const invalid = readPlateWorkspace(invalidWorkspace).baselineNormalization;
     expect(invalid.status).toBe("blocked");
     expect(invalid.findings.some((finding) => finding.code === "NORMALIZATION_INVALID_BASELINE")).toBe(true);
-    expect(() => createArtifact({ kind: "normalized-results", plates: invalidPlates, result: invalid })).toThrow(/不能导出 normalized results/);
+    expect(() => createResultArtifact({ kind: "normalized-results", plates: invalidPlates, result: invalid })).toThrow(/不能导出 normalized results/);
 
     const duplicatePlates = workspacePlates(multiPlateWorkspace()).map((plate, index) => index !== 1 ? plate : {
       ...plate,
@@ -299,13 +298,13 @@ describe("project-level baseline normalization", () => {
 
   it("keeps an explicit empty plate selection empty and stable across plate renaming", () => {
     let workspace = multiPlateWorkspace();
-    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.analysisConfig, baselineNormalization: { ...normalization, plateSelectionMode: "selected", participatingPlateIds: [] } } });
+    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.project.analysisConfig, baselineNormalization: { ...normalization, plateSelectionMode: "selected", participatingPlateIds: [] } } });
     let result = readPlateWorkspace(workspace).baselineNormalization;
     expect(result.status).toBe("blocked");
     expect(result.findings.some((finding) => finding.code === "NORMALIZATION_NO_PLATES")).toBe(true);
 
     const secondId = workspacePlates(workspace)[1].plateId!;
-    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.analysisConfig, baselineNormalization: { ...normalization, plateSelectionMode: "selected", participatingPlateIds: [secondId] } } });
+    workspace = transitionPlateWorkspace(workspace, { type: "set-analysis-config", config: { ...workspace.project.analysisConfig, baselineNormalization: { ...normalization, plateSelectionMode: "selected", participatingPlateIds: [secondId] } } });
     workspace = transitionPlateWorkspace(workspace, { type: "select-plate", index: 1 });
     workspace = transitionPlateWorkspace(workspace, { type: "rename-active-plate", name: "Renamed follow-up" });
     result = readPlateWorkspace(workspace).baselineNormalization;
@@ -349,7 +348,7 @@ describe("project-level baseline normalization", () => {
     expect(result.status).toBe("disabled");
     expect(result.findings.some((finding) => finding.code === "NORMALIZATION_DUPLICATE_IDENTITY")).toBe(true);
     expect(result.normalizationReadyRows.every((row) => row.groupOriginalMean === null && row.groupOriginalN === 0)).toBe(true);
-    const ready = createArtifact({ kind: "normalization-ready", plates: workspacePlates(workspace), result, sourceName: "disabled-review" });
+    const ready = createResultArtifact({ kind: "normalization-ready", plates: workspacePlates(workspace), result, sourceName: "disabled-review" });
     expect(ready.content).toContain("blocked,NORMALIZATION_SOURCE_BLANK_LOW_N;NORMALIZATION_DUPLICATE_IDENTITY");
 
     const incompatible = workspacePlates(multiPlateWorkspace()).map((plate, index) => index === 1 ? { ...plate, metadata: { ...plate.metadata, wavelengthNm: 490 } } : plate);

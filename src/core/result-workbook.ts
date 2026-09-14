@@ -1,6 +1,6 @@
 import XLSX from "xlsx-js-style";
 import packageMetadata from "../../package.json";
-import { annotatedWellExportRows, biologicalSummaryExportRows, technicalSummaryExportRows } from "./artifacts";
+import { annotatedWellExportRows, biologicalSummaryExportRows, technicalSummaryExportRows } from "./result-tables";
 import type { AnalysisConfig, CellViabilityAnalysisResult, ParsedPlate, WellRole } from "./types";
 
 export type ResultWorkbook = {

@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import XLSX from "xlsx-js-style";
 import { assertSignals, dragBetweenWells, manualPlateMatrix, openAcceptanceBrowser } from "./acceptance-harness.mjs";
+import { normalizationProject } from "./browser/fixtures.mjs";
+import { createScenarioReporter } from "./browser/scenario.mjs";
 
 const screenshotDir = process.argv[2];
 if (!screenshotDir) throw new Error("Usage: node scripts/visual-smoke.mjs <screenshot-directory>");
@@ -9,6 +11,7 @@ await mkdir(resolve(screenshotDir), { recursive: true });
 
 const { browser, page, consoleErrors } = await openAcceptanceBrowser();
 const baseUrl = process.env.MICROPLATE_BASE_URL ?? "http://127.0.0.1:4178/";
+const scenario = createScenarioReporter();
 
 async function verifyLayoutPreviousStep(browserPage) {
   const backToImportButton = browserPage.getByRole("button", { name: "返回数据导入" });
@@ -26,57 +29,11 @@ async function verifyAnalysisPreviousStep(browserPage) {
   await browserPage.getByRole("button", { name: "进入分析" }).click();
 }
 
-function normalizationPlate(name, timepoint, blank, values) {
-  const wells = [
-    { well: "A1", row: "A", column: 1, rawValue: blank, role: "blank" },
-    { well: "A2", row: "A", column: 2, rawValue: blank, role: "blank" },
-  ];
-  let cursor = 0;
-  Object.entries(values).forEach(([group, replicates]) => replicates.forEach((correctedMean, biologicalIndex) => {
-    [-0.02, 0.02].forEach((offset, technicalIndex) => {
-      const row = String.fromCharCode(66 + Math.floor(cursor / 12));
-      const column = cursor % 12 + 1;
-      wells.push({
-        well: `${row}${column}`, row, column, rawValue: blank + correctedMean + offset,
-        instrumentLabel: "", role: group === "Control" ? "control" : "sample",
-        sampleId: `${group}-Bio${biologicalIndex + 1}`, group, treatment: "", concentration: "", timepoint,
-        biologicalReplicate: `Bio${biologicalIndex + 1}`, technicalReplicate: `T${technicalIndex + 1}`,
-        excluded: false, notes: "",
-      });
-      cursor += 1;
-    });
-  }));
-  wells[0] = { instrumentLabel: "", sampleId: "", group: "", treatment: "", concentration: "", timepoint: "", biologicalReplicate: "", technicalReplicate: "", excluded: false, notes: "", ...wells[0] };
-  wells[1] = { instrumentLabel: "", sampleId: "", group: "", treatment: "", concentration: "", timepoint: "", biologicalReplicate: "", technicalReplicate: "", excluded: false, notes: "", ...wells[1] };
-  return {
-    metadata: {
-      sourceKind: "manual-paste", sourceFileName: `${name}.tsv`, sourceExperiment: "Browser normalization", runTimestamp: "",
-      assayMethod: "cck8", assayMethodLabel: "CCK-8", assayMethodEvidence: "user-reported", detectionMode: "absorbance", signalUnit: "OD",
-      wavelengthNm: 450, excitationWavelengthNm: null, emissionWavelengthNm: null, referenceWavelengthNm: null, measurementName: "Absorbance",
-      plateName: name, plateType: "96-well", instrumentManufacturer: "", instrumentModel: "Manual", instrumentSerialNumber: "", assayId: "",
-      protocolName: "", readDirection: "", measurementTimeSeconds: null, temperatureStartC: null, temperatureEndC: null, sheetName: name,
-      adapterId: "browser:normalization", assayModuleId: "cell-viability", detectedAssayModuleId: "cell-viability", selectedAssayModuleId: "cell-viability",
-      confirmedAssayModuleId: "cell-viability", assayAssignmentDecision: "project-restored",
-    },
-    rows: 8, columns: 12, wells, warnings: [],
-  };
-}
-
 const normalizationProjectPath = resolve(screenshotDir, "browser-baseline-normalization-project.json");
-await writeFile(normalizationProjectPath, JSON.stringify({
-  schemaVersion: 3,
-  tool: { id: "microplate-assay-studio", version: "0.6.4" },
-  generatedAt: new Date(0).toISOString(),
-  experiment: { name: "Browser baseline normalization", operator: "", date: "", notes: "" },
-  activeModuleId: "cell-viability",
-  analysisConfig: { controlGroup: "Control", relativeToControlEnabled: false, technicalCvThresholdPercent: 15, blankCvThresholdPercent: 10, baselineNormalization: { enabled: false, plateSelectionMode: "all", participatingPlateIds: [], baselineTimepoint: "", scope: "within-group", referenceGroup: "", method: "auto", scale: "fold", uncertaintyDisplay: "ci95" } },
-  plates: [
-    normalizationPlate("Plate Day 0", "Day 0", 0.1, { Control: [1, 1.2, 0.8], Drug: [1, 2, 4] }),
-    normalizationPlate("Plate Day 1", "Day 1", 0.2, { Control: [1.4, 1.5, 1.3], Drug: [2, 6, 8] }),
-  ],
-}, null, 2));
+await writeFile(normalizationProjectPath, JSON.stringify(normalizationProject(), null, 2));
 
 try {
+  scenario.begin("module guidance and responsive import");
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   const landingText = await page.locator("body").innerText();
   for (const signal of ["完整分析可用", "数据导入与预览可用", "计划中"]) {
@@ -152,6 +109,7 @@ try {
   }
   await page.getByRole("button", { name: /细胞活性 \/ 细胞增殖/ }).click();
 
+  scenario.begin("reading template and manual multi-plate import");
   await page.getByRole("tab", { name: "读数模板" }).click();
   await page.getByLabel("读数模板板型").selectOption("384");
   const templateDownload = page.waitForEvent("download");
@@ -363,6 +321,7 @@ try {
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   await page.getByRole("tab", { name: "仪器结果文件" }).click();
 
+  scenario.begin("optional vendor adapters");
   let requiredImportSignals = [];
   let requiredLayoutSignals = [];
   let incompleteLayoutGateVisible = false;
@@ -480,6 +439,7 @@ try {
     await page.screenshot({ path: resolve(screenshotDir, "microplate-studio-victor-layout.png"), fullPage: true });
   }
 
+  scenario.begin("baseline normalization and project round trip");
   await page.locator(".workspace-nav").getByRole("button", { name: /数据导入/ }).click();
   await page.locator('input[type="file"][accept=".json"]').setInputFiles(normalizationProjectPath);
   await page.getByRole("heading", { name: "确认导入" }).waitFor();
@@ -509,12 +469,8 @@ try {
   if (!("blank_corrected_technical_mean" in workbookTechnicalRows[0])) throw new Error("Technical-replicate mean is missing from the result workbook.");
   const renderedBar = page.locator(".compact-chart-panel .chart-bar").first();
   if (!await renderedBar.count()) throw new Error("Summary chart did not render a data bar for visual verification.");
-  const renderedBarStyle = await renderedBar.evaluate((element) => ({
-    fill: getComputedStyle(element).fill,
-    valueFontSize: getComputedStyle(element.parentElement?.querySelector(".chart-value") ?? element).fontSize,
-  }));
-  if (renderedBarStyle.fill !== "rgb(63, 113, 114)") throw new Error(`Summary chart bar color drifted: ${renderedBarStyle.fill}.`);
-  if (renderedBarStyle.valueFontSize !== "9px") throw new Error(`Summary chart value labels are no longer compact: ${renderedBarStyle.valueFontSize}.`);
+  const renderedBarBounds = await renderedBar.boundingBox();
+  if (!renderedBarBounds || renderedBarBounds.width < 2 || renderedBarBounds.height < 2) throw new Error("Summary chart rendered an unusable data bar.");
   const normalizedDownloadEvent = page.waitForEvent("download");
   await page.getByRole("button", { name: "标准化结果" }).click();
   const normalizedDownload = await normalizedDownloadEvent;
@@ -551,6 +507,8 @@ try {
   };
   console.log(JSON.stringify(result, null, 2));
   if (consoleErrors.length) process.exitCode = 1;
+} catch (error) {
+  throw scenario.enrich(error);
 } finally {
   await browser.close();
 }

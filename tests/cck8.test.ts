@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCck8 } from "../src/core/assays/cck8";
-import { createArtifact } from "../src/core/artifacts";
+import { createResultArtifact } from "../src/core/result-export";
 import type { WellRecord, WellRole } from "../src/core/types";
 import { fixturePlate } from "./fixtures/plate-fixtures";
 
@@ -87,7 +87,7 @@ describe("CCK-8 analysis", () => {
     expect(result.significanceComparisons[0].note).toContain("Paired t-test");
     expect(result.findings.filter((finding) => finding.severity === "error")).toEqual([]);
 
-    const summaryCsv = createArtifact({ kind: "biological-summary", plate: fixturePlate(), result, scope: "all", analysisConfig: config }).content;
+    const summaryCsv = createResultArtifact({ kind: "biological-summary", plate: fixturePlate(), result, scope: "all", analysisConfig: config }).content;
     const [headerLine, ...dataLines] = summaryCsv.split("\n");
     const headers = headerLine.split(",");
     const drugCsvRow = dataLines.find((line) => line.includes("Drug"))?.split(",");

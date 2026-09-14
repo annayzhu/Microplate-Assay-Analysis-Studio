@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createArtifact, parseProjectArtifact, projectSchemaVersion, toolIdentity } from "../src/core/artifacts";
+import { createProjectArtifact, parseProjectArtifact, projectSchemaVersion, toolIdentity } from "../src/core/project-file";
 import { parsePastedPlateReadings } from "../src/core/instruments/manual-readings";
 
 const matrix = "读数\t1\t2\t3\nA\t0\t0.2\t0.3\nB\t0.4\t0.5\t0.6";
@@ -23,7 +23,7 @@ describe("versioned reproducible artifact module", () => {
       notes: "confirmed",
     } : well);
     const experiment = { name: "Round trip", operator: "Researcher", date: "2026-08-22", notes: "local only" };
-    const artifact = createArtifact({ kind: "project", plates: [{ ...plate, metadata: { ...plate.metadata, confirmedAssayMethodLabel: "CCK-8 / WST-8", assayMethodReviewDecision: "user-confirmed" }, wells }], experiment, activeModuleId: "cell-viability", analysisConfig: config });
+    const artifact = createProjectArtifact({ plates: [{ ...plate, metadata: { ...plate.metadata, confirmedAssayMethodLabel: "CCK-8 / WST-8", assayMethodReviewDecision: "user-confirmed" }, wells }], experiment, activeModuleId: "cell-viability", analysisConfig: config });
     const restored = parseProjectArtifact(artifact.content, "round-trip.json");
 
     expect(artifact.filename).toContain("reproducible-project.json");
@@ -50,8 +50,7 @@ describe("versioned reproducible artifact module", () => {
       signalUnit: "OD",
       wavelengthNm: 450,
     }).plates[0];
-    const artifact = createArtifact({
-      kind: "project",
+    const artifact = createProjectArtifact({
       plates: [plate],
       experiment: { name: "Legacy", operator: "", date: "", notes: "" },
       activeModuleId: "cell-viability",

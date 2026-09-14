@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadArtifact, downloadBlob, downloadTextFile } from "./adapters/browser-download";
-import { createArtifact, toolIdentity } from "./core/artifacts";
+import { createProjectArtifact, toolIdentity } from "./core/project-file";
+import { createResultArtifact } from "./core/result-export";
 import { assayModules, detectedAssayModule, getAssayWorkflow } from "./core/assay-workflows";
 import { defaultBaselineNormalizationConfig } from "./core/baseline-normalization";
-import { importInstrumentFiles, importPlateReadings } from "./core/import";
-import { createReadingTemplateWorkbook, type ManualReadingMetadata } from "./core/instruments/manual-readings";
+import type { ManualReadingMetadata } from "./core/instruments/manual-readings";
 import { currentPlateLayoutCsv, layoutTemplateCsv, plateTemplateDefinitions, previewLayoutText, type LayoutPatch } from "./core/layout";
-import { createResultWorkbook } from "./core/result-workbook";
 import {
   defaultAnalysisConfig,
   appendPlateWorkspace,
@@ -22,27 +21,13 @@ import { PlateMap } from "./components/PlateMap";
 import { SummaryChart } from "./components/SummaryChart";
 import { AssayDataExplorer } from "./components/AssayDataExplorer";
 import { AssayWorkflowPanel, assayStatusLabel } from "./components/AssayWorkflowPanel";
+import { PlateContextTabs, plateSwitcherLabel } from "./components/PlateContextTabs";
+import { useFeedback } from "./features/app/use-feedback";
+import { AppHeader, AssaySelector, FeedbackNotices, WorkspaceNavigation, type WorkspaceViewName } from "./features/app/AppChrome";
+import { useImportSession } from "./features/import/use-import-session";
+import { emptyBatchDraft, useLayoutSession, type BatchDraft } from "./features/layout/use-layout-session";
 
-type View = "import" | "layout" | "analysis";
-type ImportMode = "instrument" | "paste" | "template";
-type ImportTarget = "append" | "replace";
-type DraftStatus = "idle" | "dirty" | "applied";
-type PlatePresentation = {
-  zoom: number;
-  zoomManuallyChanged: boolean;
-};
-type BatchDraft = {
-  role: "" | WellRole;
-  sampleId: string;
-  group: string;
-  treatment: string;
-  concentration: string;
-  timepoint: string;
-  biologicalReplicate: string;
-  technicalReplicate: string;
-  excluded: "true" | "false";
-  notes: string;
-};
+type View = WorkspaceViewName;
 
 const wellRoles: WellRole[] = ["unassigned", "sample", "control", "qc", "blank", "standard"];
 const defaultLayoutTemplateId = "96";
@@ -58,19 +43,6 @@ const layoutFieldLabels: Record<keyof LayoutPatch, string> = {
   technicalReplicate: "技术重复",
   excluded: "排除状态",
   notes: "备注",
-};
-
-const emptyBatchDraft: BatchDraft = {
-  role: "",
-  sampleId: "",
-  group: "",
-  treatment: "",
-  concentration: "",
-  timepoint: "",
-  biologicalReplicate: "",
-  technicalReplicate: "",
-  excluded: "false",
-  notes: "",
 };
 
 function format(value: number | null, digits = 3): string {
@@ -173,101 +145,41 @@ function templateIdForPlate(plate: ParsedPlate): string {
   return plateTemplateDefinitions.find((template) => template.rows === plate.rows && template.columns === plate.columns)?.id ?? defaultLayoutTemplateId;
 }
 
-function plateSwitcherLabel(plate: ParsedPlate, index: number, projectPlates: ParsedPlate[]): string {
-  const duplicateName = projectPlates.filter((candidate) => candidate.metadata.plateName === plate.metadata.plateName).length > 1;
-  const sourceStem = plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
-  return `${index + 1}. ${plate.metadata.plateName}${duplicateName && sourceStem !== plate.metadata.plateName ? ` · ${sourceStem}` : ""}`;
-}
-
-function sourceStem(plate: ParsedPlate): string {
-  return plate.metadata.sourceFileName.replace(/\.[^.]+$/, "");
-}
-
-function PlateContextTabs({ plates, activePlateIndex, onSelect, context }: {
-  plates: ParsedPlate[];
-  activePlateIndex: number;
-  onSelect: (index: number) => void;
-  context: "layout" | "analysis";
-}) {
-  const active = plates[activePlateIndex];
-  if (!active) return null;
-  const contextLabel = context === "analysis" ? "当前分析板" : "当前板";
-  return <section className={`plate-context-switcher ${context}-plate-context`} aria-label={`${contextLabel}与项目孔板`}>
-    <div className="active-plate-identity">
-      <span>{contextLabel} {activePlateIndex + 1} / {plates.length}</span>
-      <strong>{active.metadata.plateName}</strong>
-      <small title={active.metadata.sourceFileName}>{active.metadata.sourceFileName}</small>
-    </div>
-    {plates.length > 1 ? <nav className="plate-context-tabs" aria-label={context === "analysis" ? "切换分析孔板" : "切换项目孔板"}>
-      {plates.map((item, index) => {
-        const label = plateSwitcherLabel(item, index, plates);
-        return <button
-          type="button"
-          key={item.plateId ?? `${item.metadata.plateName}-${index}`}
-          className={index === activePlateIndex ? "active" : ""}
-          aria-current={index === activePlateIndex ? "page" : undefined}
-          aria-label={`切换到 ${label}`}
-          title={`${label} · ${item.metadata.sourceFileName}`}
-          onClick={() => onSelect(index)}
-        >
-          <strong>{index + 1}. {item.metadata.plateName}</strong>
-          <small>{sourceStem(item)}</small>
-        </button>;
-      })}
-    </nav> : null}
-  </section>;
-}
-
 export default function App() {
   const instrumentInput = useRef<HTMLInputElement>(null);
   const readingTemplateInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
   const layoutInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<View>("import");
-  const [importMode, setImportMode] = useState<ImportMode>("instrument");
-  const [selectedModuleId, setSelectedModuleId] = useState<AssayModuleId>("cell-viability");
-  const [moduleSelectionTouched, setModuleSelectionTouched] = useState(false);
   const [workspace, setWorkspace] = useState<PlateWorkspaceState | null>(null);
-  const [platePresentations, setPlatePresentations] = useState<PlatePresentation[]>([]);
-  const [pendingBatch, setPendingBatch] = useState<PlateImportBatch | null>(null);
-  const [pendingModuleIds, setPendingModuleIds] = useState<AssayModuleId[]>([]);
-  const [pendingIncludedPlates, setPendingIncludedPlates] = useState<Set<number>>(new Set());
-  const [pendingConflictConfirmed, setPendingConflictConfirmed] = useState(false);
-  const [pendingImportTarget, setPendingImportTarget] = useState<ImportTarget>("replace");
-  const [manualText, setManualText] = useState("");
-  const [manualDetectionMode, setManualDetectionMode] = useState<DetectionMode>("absorbance");
-  const [manualSignalUnit, setManualSignalUnit] = useState("OD");
-  const [manualWavelength, setManualWavelength] = useState("450");
-  const [manualExcitation, setManualExcitation] = useState("");
-  const [manualEmission, setManualEmission] = useState("");
-  const [readingTemplateId, setReadingTemplateId] = useState(defaultLayoutTemplateId);
-  const [readingTemplatePlateCount, setReadingTemplatePlateCount] = useState(1);
-  const [layoutTemplateId, setLayoutTemplateId] = useState(defaultLayoutTemplateId);
-  const [pendingLayoutFile, setPendingLayoutFile] = useState<{ name: string; text: string } | null>(null);
-  const [layoutBiologicalMode, setLayoutBiologicalMode] = useState<"preserve" | "clear">("preserve");
-  const [layoutMismatchConfirmed, setLayoutMismatchConfirmed] = useState(false);
-  const [annotationPanelCollapsed, setAnnotationPanelCollapsed] = useState(false);
-  const [batchDraft, setBatchDraft] = useState<BatchDraft>(emptyBatchDraft);
-  const [draftStatus, setDraftStatus] = useState<DraftStatus>("idle");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [autoNumberTechnical, setAutoNumberTechnical] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [methodReviewOpen, setMethodReviewOpen] = useState(false);
-  const [methodReviewDraft, setMethodReviewDraft] = useState("");
+  const {
+    importMode, setImportMode, selectedModuleId, setSelectedModuleId, moduleSelectionTouched, setModuleSelectionTouched,
+    pendingBatch, setPendingBatch, pendingModuleIds, setPendingModuleIds, pendingIncludedPlates, setPendingIncludedPlates,
+    pendingConflictConfirmed, setPendingConflictConfirmed, pendingImportTarget, setPendingImportTarget,
+    manualText, setManualText, manualDetectionMode, setManualDetectionMode, manualSignalUnit, setManualSignalUnit,
+    manualWavelength, setManualWavelength, manualExcitation, setManualExcitation, manualEmission, setManualEmission,
+    readingTemplateId, setReadingTemplateId, readingTemplatePlateCount, setReadingTemplatePlateCount, loading, setLoading,
+  } = useImportSession();
+  const {
+    platePresentations, setPlatePresentations, layoutTemplateId, setLayoutTemplateId, pendingLayoutFile, setPendingLayoutFile,
+    layoutBiologicalMode, setLayoutBiologicalMode, layoutMismatchConfirmed, setLayoutMismatchConfirmed,
+    annotationPanelCollapsed, setAnnotationPanelCollapsed, batchDraft, setBatchDraft, draftStatus, setDraftStatus,
+    advancedOpen, setAdvancedOpen, autoNumberTechnical, setAutoNumberTechnical,
+    methodReviewOpen, setMethodReviewOpen, methodReviewDraft, setMethodReviewDraft,
+  } = useLayoutSession();
+  const { notice, setNotice, error, setError } = useFeedback();
   const selectedModule = assayModules.find((module) => module.id === selectedModuleId) ?? assayModules[0];
   const workspaceView = useMemo(() => workspace ? readPlateWorkspace(workspace) : null, [workspace]);
   const plates = useMemo(() => workspace ? workspacePlates(workspace) : [], [workspace]);
-  const activePlateIndex = workspace?.activePlateIndex ?? 0;
+  const activePlateIndex = workspace?.session.activePlateIndex ?? 0;
   const plate = workspaceView?.activePlate ?? null;
   const wells = workspaceView?.wells ?? [];
-  const selected = workspace?.selectedWellIds ?? new Set<string>();
-  const selectionAnchor = workspace?.selectionAnchor ?? null;
-  const selectedSummaryKeys = workspace?.selectedSummaryKeys ?? new Set<string>();
-  const config = workspace?.analysisConfig ?? defaultAnalysisConfig;
-  const controlGroupTouched = workspace?.controlGroupTouched ?? false;
-  const experiment = workspace?.experiment ?? { name: "", operator: "", date: "", notes: "" };
+  const selected = workspace?.session.selectedWellIds ?? new Set<string>();
+  const selectionAnchor = workspace?.session.selectionAnchor ?? null;
+  const selectedSummaryKeys = workspace?.session.selectedSummaryKeys ?? new Set<string>();
+  const config = workspaceView?.analysisConfig ?? defaultAnalysisConfig;
+  const controlGroupTouched = workspace?.project.controlGroupTouched ?? false;
+  const experiment = workspace?.project.experiment ?? { name: "", operator: "", date: "", notes: "" };
   const platePresentation = platePresentations[activePlateIndex] ?? { zoom: 1, zoomManuallyChanged: false };
   const plateZoom = platePresentation.zoom;
   const activeModuleId = workspaceView?.activeModuleId ?? selectedModuleId;
@@ -423,7 +335,7 @@ export default function App() {
       moduleSelectionTouched,
     };
     const append = pendingImportTarget === "append" && workspace && batch.sourceKind !== "project-file";
-    const previousPlateCount = workspace?.plates.length ?? 0;
+    const previousPlateCount = workspace?.project.plates.length ?? 0;
     const nextWorkspace = append ? appendPlateWorkspace(workspace, plan, options) : openPlateWorkspace(plan, options);
     const nextPlates = workspacePlates(nextWorkspace);
     setWorkspace(nextWorkspace);
@@ -435,8 +347,8 @@ export default function App() {
     setPendingIncludedPlates(new Set());
     setPendingModuleIds([]);
     setPendingConflictConfirmed(false);
-    resetPlatePresentation(nextPlates[nextWorkspace.activePlateIndex]);
-    setSelectedModuleId(nextWorkspace.selectedModuleId);
+    resetPlatePresentation(nextPlates[nextWorkspace.session.activePlateIndex]);
+    setSelectedModuleId(readPlateWorkspace(nextWorkspace).activeModuleId);
     setModuleSelectionTouched(false);
     setNotice(append
       ? `已追加 ${pendingIncludedPlates.size} 块板；当前项目共 ${nextPlates.length} 块板。各板原始读数与 blank 独立保留。`
@@ -463,7 +375,7 @@ export default function App() {
     setWorkspace(nextWorkspace);
     setMethodReviewOpen(false);
     resetPlatePresentation(next);
-    setSelectedModuleId(nextWorkspace.selectedModuleId);
+    setSelectedModuleId(readPlateWorkspace(nextWorkspace).activeModuleId);
     setModuleSelectionTouched(false);
     setNotice(`已切换到 ${next.metadata.plateName}；该板的注释和分析状态独立保存。`);
   }
@@ -495,6 +407,7 @@ export default function App() {
     setError("");
     setNotice("");
     try {
+      const { importInstrumentFiles } = await import("./core/import");
       previewBatch(await importInstrumentFiles(files));
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "文件导入失败。");
@@ -507,6 +420,7 @@ export default function App() {
     setError("");
     setNotice("");
     try {
+      const { importPlateReadings } = await import("./core/import");
       const result = await importPlateReadings({ kind: "manual-paste", text: manualText, metadata: manualMetadata });
       previewBatch(result);
     } catch (importError) {
@@ -519,6 +433,7 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
+      const { importPlateReadings } = await import("./core/import");
       const result = await importPlateReadings({ kind: "reading-template", file, metadata: manualMetadata });
       previewBatch(result);
     } catch (importError) {
@@ -533,6 +448,7 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
+      const { importPlateReadings } = await import("./core/import");
       previewBatch(await importPlateReadings({ kind: "project-file", file }));
     } catch (importError) {
       setPendingBatch(null);
@@ -542,7 +458,8 @@ export default function App() {
     }
   }
 
-  function downloadReadingTemplate() {
+  async function downloadReadingTemplate() {
+    const { createReadingTemplateWorkbook } = await import("./core/instruments/manual-readings");
     const bytes = createReadingTemplateWorkbook(selectedReadingTemplate, readingTemplatePlateCount, manualMetadata);
     downloadBlob(
       `microplate-reading-template-${selectedReadingTemplate.id}well-${readingTemplatePlateCount}plate.xlsx`,
@@ -552,8 +469,7 @@ export default function App() {
 
   function downloadProjectFile() {
     if (!workspace) return;
-    downloadArtifact(createArtifact({
-      kind: "project",
+    downloadArtifact(createProjectArtifact({
       plates: workspacePlates(workspace),
       experiment,
       activeModuleId,
@@ -649,14 +565,10 @@ export default function App() {
     setNotice("当前板布局已导出；文件仅包含孔位注释，不包含原始读数和分析结果。");
   }
 
-  function exportFiles(kind: "workbook" | "package" | "normalization-ready" | "normalized") {
+  async function exportFiles(kind: "workbook" | "normalization-ready" | "normalized") {
     if (!plate) return;
-    if (kind === "package") {
-      downloadArtifact(createArtifact({ kind: "analysis-package", plate, plates, wells, analysisConfig: config, result: analysis, normalizationResult: baselineNormalization }));
-      return;
-    }
     if (kind === "normalization-ready" || kind === "normalized") {
-      downloadArtifact(createArtifact({
+      downloadArtifact(createResultArtifact({
         kind: kind === "normalized" ? "normalized-results" : "normalization-ready",
         plates,
         result: kind === "normalization-ready" ? baselineNormalization : displayedBaselineNormalization,
@@ -665,6 +577,7 @@ export default function App() {
       return;
     }
     if (kind === "workbook") {
+      const { createResultWorkbook } = await import("./core/result-workbook");
       const workbook = createResultWorkbook({ plate, result: displayedAnalysis, analysisConfig: config, scope: exportScope });
       downloadBlob(workbook.filename, new Blob([workbook.bytes], { type: workbook.mimeType }));
       setNotice("结果 Excel 已导出：包含导出说明、生物学汇总、技术复孔汇总、孔级数据和板布局。");
@@ -682,42 +595,14 @@ export default function App() {
   }
 
   return <div className="app-shell">
-    <header className="topbar">
-      <div className="page-frame topbar-inner">
-        <button className="brand" type="button" onClick={() => navigateTo("import")}>
-          <span className="brand-mark"><i /><i /><i /><i /></span>
-          <span><strong>Microplate Assay Studio</strong><small>酶标实验分析工作台 · v{toolIdentity.version}</small></span>
-        </button>
-        <div className="topbar-actions">
-          <span className="privacy-pill"><i />Browser-local</span>
-          {plate ? <span className={`status-pill ${workflowReady ? "ready" : "review"}`}>{workflowReady ? (activeModule.status === "complete" ? "分析就绪" : "数据预览就绪") : "需要补充信息"}</span> : null}
-        </div>
-      </div>
-    </header>
+    <AppHeader version={toolIdentity.version} hasPlate={Boolean(plate)} workflowReady={workflowReady} previewOnly={activeModule.status !== "complete"} onHome={() => navigateTo("import")} />
 
     <main>
-      <section className="assay-strip">
-        <div className="page-frame assay-strip-inner">
-          <div>
-            <h1>酶标数据入口，选择实验类型进行分析</h1>
-          </div>
-          <div className="assay-cards">
-            {assayModules.map((module) => <button key={module.id} type="button" disabled={module.status === "planned"} aria-pressed={selectedModuleId === module.id} onClick={() => selectAssayModule(module.id, module.name)} className={`assay-card ${module.status} ${selectedModuleId === module.id ? "active" : ""}`}>
-              <span>{module.shortName}</span>
-              <strong>{module.name}</strong>
-              <small>{module.measurementTarget}</small>
-              <em>{assayStatusLabel(module.status)}</em>
-            </button>)}
-          </div>
-        </div>
-      </section>
+      <AssaySelector modules={assayModules} selectedId={selectedModuleId} onSelect={selectAssayModule} />
 
-      {plate ? <nav className="workspace-nav" aria-label="工作区视图">
-        {(["import", "layout", "analysis"] as View[]).map((item, index) => <button type="button" key={item} className={view === item ? "active" : ""} onClick={() => navigateTo(item)}><span>{index + 1}</span>{item === "import" ? "数据导入" : item === "layout" ? "板图与注释" : "分析与导出"}</button>)}
-      </nav> : null}
+      {plate ? <WorkspaceNavigation active={view} onSelect={navigateTo} /> : null}
 
-      {notice ? <div className="notice success" role="status">{notice}</div> : null}
-      {error ? <div className="notice warning" role="alert">{error}<button type="button" onClick={() => setError("")}>×</button></div> : null}
+      <FeedbackNotices notice={notice} error={error} onDismissError={() => setError("")} />
 
       {view === "import" ? <section className="workspace import-workspace">
         <div className="section-heading split">
@@ -902,7 +787,7 @@ export default function App() {
         </div>
         <PlateContextTabs plates={plates} activePlateIndex={activePlateIndex} onSelect={selectActivePlate} context="analysis" />
         <AssayWorkflowPanel module={activeModule} plate={plate} />
-        <AssayDataExplorer dataset={plate.assayData} onExport={() => downloadArtifact(createArtifact({ kind: "measurements", plate, wells, scope: "all" }))} onExportProject={downloadProjectFile} />
+        <AssayDataExplorer dataset={plate.assayData} onExport={() => downloadArtifact(createResultArtifact({ kind: "measurements", plate, wells, scope: "all" }))} onExportProject={downloadProjectFile} />
       </section> : null}
 
       {view === "analysis" && plate && !useGenericWorkflow ? <section className="workspace analysis-workspace">
@@ -973,7 +858,7 @@ export default function App() {
             }) : <tr><td colSpan={summaryTableColumns.length + 1} className="empty-cell">尚无可汇总数据。</td></tr>}</tbody></table></div>
             {normalizationConfig.enabled ? <div className="normalization-preview">
               <div><strong>Calculated in Studio · baseline normalization</strong><span className={`readiness ${baselineNormalization.status === "ready" ? "ready" : "review"}`}>{baselineNormalization.status}</span></div>
-              {baselineNormalization.status === "ready" ? <div className="table-scroll compact"><table><thead><tr><th>Group</th><th>Time</th><th>Baseline</th><th>Method</th><th>Uncertainty</th><th>n</th><th>Normalized mean</th><th>SD</th><th>SEM / propagated SE</th><th>95% CI</th><th>Method warning</th></tr></thead><tbody>{displayedBaselineNormalization.normalizedRows.map((row) => <tr key={row.key}><td>{row.group}</td><td>{row.timepoint}</td><td>{row.baselineGroup} · {row.baselineTimepoint}</td><td>{row.method}</td><td>{row.uncertaintyMethod}</td><td>{row.n}</td><td>{format(row.normalizedMean)}</td><td>{format(row.normalizedSd)}</td><td>{format(row.normalizedSem ?? row.propagatedSe)}</td><td>{row.ci95Low === null || row.ci95High === null ? "未计算" : `${format(row.ci95Low)}–${format(row.ci95High)}`}</td><td>{row.warnings.length ? row.warnings.join(" ") : "—"}</td></tr>)}</tbody></table></div> : <p>标准化结果暂不可用；请按左侧提示复核 baseline、板兼容性和 Bio ID。</p>}
+              {baselineNormalization.status === "ready" ? <div className="table-scroll compact"><table><thead><tr><th>Group</th><th>Time</th><th>Baseline</th><th>Method</th><th>Uncertainty</th><th>n</th><th>Normalized mean</th><th>SD</th><th>SEM / propagated SE</th><th>95% CI</th><th>Method warning</th></tr></thead><tbody>{displayedBaselineNormalization.normalizedRows.map((row) => <tr key={row.key}><td>{row.group}</td><td>{row.timepoint}</td><td>{row.baselineGroup} · {row.baselineTimepoint}</td><td>{row.method}</td><td>{row.uncertaintyMethod}</td><td>{row.n}</td><td>{format(row.normalizedMean)}</td><td>{format(row.normalizedSd)}</td><td>{format(row.normalizedSem ?? row.propagatedSe)}</td><td>{row.ci95Low === null || row.ci95High === null ? "未计算" : `${format(row.ci95Low)} - ${format(row.ci95High)}`}</td><td>{row.warnings.length ? row.warnings.join(" ") : "未记录"}</td></tr>)}</tbody></table></div> : <p>标准化结果暂不可用；请按左侧提示复核 baseline、板兼容性和 Bio ID。</p>}
             </div> : null}
           </section>
 
